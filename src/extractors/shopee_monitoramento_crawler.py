@@ -120,17 +120,23 @@ class ShopeeExtractor:
         logger.info("Iniciando download da API...")
         
         try:
-            params = {
+            # A API usa POST, não GET!
+            payload = {
                 "type": "total_expedido",
-                "timestamp": int(time.time() * 1000),
             }
 
             logger.info(f"URL: {self.EXPORT_URL}")
-            logger.info(f"Params: {params}")
+            logger.info(f"Method: POST")
+            logger.info(f"Payload: {payload}")
 
-            response = self.session.get(
+            # Headers específicos para POST
+            self.session.headers.update({
+                "Content-Type": "application/json;charset=UTF-8",
+            })
+
+            response = self.session.post(
                 self.EXPORT_URL,
-                params=params,
+                json=payload,
                 timeout=60
             )
 
