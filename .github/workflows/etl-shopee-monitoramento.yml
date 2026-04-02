@@ -22,7 +22,7 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Instalar dependências do sistema (Ubuntu 24.04)
+      - name: Instalar dependências do sistema
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -44,6 +44,9 @@ jobs:
             libcairo2 \
             libatspi2.0-0t64 \
             libglib2.0-0t64 \
+            libxshmfence1 \
+            libx11-xcb1 \
+            libxcb1 \
             --no-install-recommends
 
       - name: Instalar dependências Python
@@ -51,9 +54,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Instalar Playwright browsers
+      - name: Instalar Playwright (sem dependências)
         run: |
-          playwright install chromium
+          playwright install chromium --no-deps
 
       - name: Rodar Pipeline ETL
         env:
