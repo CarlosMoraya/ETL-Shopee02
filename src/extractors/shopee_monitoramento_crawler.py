@@ -1,32 +1,61 @@
 """
 Extractor: Visão Geral de Motoristas - Total Expedido
-Fonte: Shopee Logistics - API Direta
+Fonte: Shopee Logistics - API Direta (via Cookies)
 Destino: data/raw/shopee_monitoramento_raw.csv
 
-ESTE CRAWLER NÃO USA BROWSER - Apenas requests HTTP
+ESTE CRAWLER USA COOKIES - Sem login, sem browser
 """
 import requests
 import os
 from pathlib import Path
 from datetime import datetime
 import time
+import urllib.parse
 
-from src.utils import get_logger, DATA_RAW_DIR, SHOPEE_EMAIL, SHOPEE_PWD
+from src.utils import get_logger, DATA_RAW_DIR
 
 logger = get_logger(__name__)
 
 
 class ShopeeExtractor:
     """
-    Extrator da Shopee usando API direta (sem browser)
+    Extrator da Shopee usando cookies de sessão
     """
     
     BASE_URL = "https://logistics.myagencyservice.com.br"
-    LOGIN_URL = f"{BASE_URL}/mgmt/api/pc/login"
     EXPORT_URL = f"{BASE_URL}/mgmt/api/pc/agency/metric/lm/export_fleet_list_v2"
     
     def __init__(self):
         self.session = requests.Session()
+        
+        # Cookies de autenticação (pegos do browser)
+        # ADICIONE ESTES COOKIES COMO SECRETS NO GITHUB:
+        # - SHOPEE_FMS_USER_SKEY
+        # - SHOPEE_SPX_UK
+        # - SHOPEE_FMS_USER_ID
+        # - SHOPEE_FMS_USER_AGENCY_ID
+        # - etc.
+        
+        self.cookies = {
+            "fms_display_name": os.environ.get("SHOPEE_FMS_DISPLAY_NAME", ""),
+            "fms_user_agency_id": os.environ.get("SHOPEE_FMS_USER_AGENCY_ID", "50"),
+            "fms_user_id": os.environ.get("SHOPEE_FMS_USER_ID", ""),
+            "fms_user_skey": os.environ.get("SHOPEE_FMS_USER_SKEY", ""),
+            "spx_agid": os.environ.get("SHOPEE_SPX_AGID", "50"),
+            "spx_cid": os.environ.get("SHOPEE_SPX_CID", "BR"),
+            "spx_dn": os.environ.get("SHOPEE_SPX_DN", ""),
+            "spx_st": os.environ.get("SHOPEE_SPX_ST", "4"),
+            "spx_uid": os.environ.get("SHOPEE_SPX_UID", ""),
+            "spx_uk": os.environ.get("SHOPEE_SPX_UK", ""),
+            "spx-admin-device-id": os.environ.get("SHOPEE_ADMIN_DEVICE_ID", ""),
+            "spx-admin-lang": os.environ.get("SHOPEE_ADMIN_LANG", "pt-br"),
+            "ssc_user_role": os.environ.get("SHOPEE_SSC_USER_ROLE", ""),
+        }
+        
+        # Filtrar cookies vazios
+        self.cookies = {k: v for k, v in self.cookies.items() if v}
+        
+        # Headers
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
@@ -34,66 +63,38 @@ class ShopeeExtractor:
             "Origin": self.BASE_URL,
             "Referer": f"{self.BASE_URL}/",
         })
-    
-    def login(self, email: str, password: str) -> bool:
-        """
-        Realiza login no sistema e salva o cookie/token.
         
-        Args:
-            email: Email de login
-            password: Senha
-            
-        Returns:
-            bool: True se login sucesso
+        # Adicionar cookies
+        if self.cookies:
+            self.session.cookies.update(self.cookies)
+            logger.info(f"Cookies configurados: {list(self.cookies.keys())}")
+        else:
+            logger.warning("Nenhum cookie configurado! Adicione os secrets no GitHub.")
+    
+    def testar_conexao(self) -> bool:
         """
-        logger.info("Iniciando login...")
+        Testa se os cookies são válidos fazendo uma requisição simples.
+        
+        Returns:
+            bool: True se conexão OK
+        """
+        logger.info("Testando conexão com cookies...")
         
         try:
-            # Payload de login (ajustar conforme necessário)
-            payload = {
-                "email": email,
-                "password": password,
-            }
+            # Requisição simples para testar
+            test_url = f"{self.BASE_URL}/mgmt/api/sys/log70=[api]"
             
-            logger.info(f"Tentando login com email: {email}")
-            
-            response = self.session.post(
-                self.LOGIN_URL,
-                json=payload,
-                timeout=30
-            )
-            
-            logger.info(f"Status do login: {response.status_code}")
+            response = self.session.get(test_url, timeout=30)
             
             if response.status_code == 200:
-                dados = response.json()
-                
-                # Verificar se login foi bem sucedido
-                if dados.get("success") or dados.get("token") or "JSESSIONID" in response.cookies:
-                    logger.info("✅ Login realizado com sucesso!")
-                    
-                    # Salvar cookies para próximas requisições
-                    logger.info(f"Cookies obtidos: {list(response.cookies.keys())}")
-                    
-                    return True
-            
-            # Tentar alternativa - talvez o login seja form-data
-            logger.warning("Tentando login como form-data...")
-            response = self.session.post(
-                self.LOGIN_URL,
-                data=payload,
-                timeout=30
-            )
-            
-            if response.status_code == 200 and "JSESSIONID" in response.cookies:
-                logger.info("✅ Login realizado com form-data!")
+                logger.info("✅ Cookies válidos! Conexão OK.")
                 return True
-            
-            logger.error(f"Falha no login. Response: {response.text[:200]}")
-            return False
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Erro de rede no login: {e}")
+            else:
+                logger.warning(f"Status: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Erro no teste: {e}")
             return False
     
     def baixar_export(self, output_path: Path) -> Path:
@@ -109,14 +110,13 @@ class ShopeeExtractor:
         logger.info("Iniciando download da API...")
         
         try:
-            # Parâmetros da requisição (ajustar conforme necessário)
+            # Parâmetros da requisição
             params = {
-                "type": "total_expedido",  # Filtro: Total Expedido
-                "timestamp": int(time.time() * 1000),  # Para evitar cache
+                "type": "total_expedido",
+                "timestamp": int(time.time() * 1000),
             }
             
             logger.info(f"URL: {self.EXPORT_URL}")
-            logger.info(f"Parâmetros: {params}")
             
             response = self.session.get(
                 self.EXPORT_URL,
@@ -130,7 +130,7 @@ class ShopeeExtractor:
                 # Determinar nome do arquivo
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 
-                # Verificar Content-Disposition para nome do arquivo
+                # Verificar Content-Disposition
                 content_disp = response.headers.get("Content-Disposition", "")
                 if "filename=" in content_disp:
                     filename = content_disp.split("filename=")[1].strip('"\'')
@@ -150,6 +150,11 @@ class ShopeeExtractor:
             else:
                 logger.error(f"Erro no download: {response.status_code}")
                 logger.error(f"Response: {response.text[:500]}")
+                
+                # Se for 401/403, cookies expiraram
+                if response.status_code in [401, 403]:
+                    logger.error("Cookies expirados! Atualize os secrets no GitHub.")
+                
                 raise Exception(f"Falha no download: {response.status_code}")
                 
         except requests.exceptions.RequestException as e:
@@ -178,12 +183,12 @@ def extract_shopee_monitoramento() -> Path:
     extractor = ShopeeExtractor()
     
     try:
-        # Login
-        if not extractor.login(SHOPEE_EMAIL, SHOPEE_PWD):
-            raise Exception("Falha no login. Verifique email e senha.")
+        # Testar conexão
+        if not extractor.testar_conexao():
+            raise Exception("Falha na conexão. Verifique os cookies.")
         
-        # Aguardar um pouco após login
-        time.sleep(2)
+        # Aguardar um pouco
+        time.sleep(1)
         
         # Baixar arquivo
         arquivo_baixado = extractor.baixar_export(output_path)
