@@ -10,9 +10,7 @@ on:
 jobs:
   etl-shopee-monitoramento:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    container:
-      image: mcr.microsoft.com/playwright/python:v1.42.0-jammy
+    timeout-minutes: 10
 
     steps:
       - name: Checkout do código
@@ -26,7 +24,7 @@ jobs:
 
       - name: Instalar dependências Python
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Rodar Pipeline ETL
@@ -34,7 +32,6 @@ jobs:
           SHOPEE_EMAIL: ${{ secrets.SHOPEE_EMAIL }}
           SHOPEE_PWD: ${{ secrets.SHOPEE_PWD }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
-          CRAWLER_HEADLESS: "true"
         run: |
           python -m src.pipelines.shopee_monitoramento_pipeline
 
@@ -44,6 +41,5 @@ jobs:
         with:
           name: erro-crawler
           path: |
-            erro_*.png
             data/raw/
           retention-days: 7

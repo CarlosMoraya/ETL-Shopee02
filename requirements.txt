@@ -1,5 +1,6 @@
-# Playwright (versão compatível com Ubuntu 24.04)
-playwright==1.42.0
+# HTTP e Web Scraping
+requests==2.31.0
+httpx==0.26.0
 
 # Pandas e processamento de dados
 pandas==2.1.4
@@ -9,8 +10,7 @@ openpyxl==3.1.2  # Para ler Excel
 # Banco de dados
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
-python-dotenv==1.0.0
 
 # Utils
-requests==2.31.0
+python-dotenv==1.0.0
 pydantic==2.5.3

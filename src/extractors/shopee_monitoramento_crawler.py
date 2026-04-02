@@ -1,186 +1,167 @@
 """
 Extractor: Visão Geral de Motoristas - Total Expedido
-Fonte: Shopee Logistics - Delivery Dashboard
+Fonte: Shopee Logistics - API Direta
 Destino: data/raw/shopee_monitoramento_raw.csv
+
+ESTE CRAWLER NÃO USA BROWSER - Apenas requests HTTP
 """
-import asyncio
+import requests
 import os
 from pathlib import Path
-from playwright.async_api import async_playwright
-import pandas as pd
 from datetime import datetime
+import time
 
-from src.utils import (
-    get_logger,
-    get_env,
-    DATA_RAW_DIR,
-    SHOPEE_EMAIL,
-    SHOPEE_PWD,
-)
+from src.utils import get_logger, DATA_RAW_DIR, SHOPEE_EMAIL, SHOPEE_PWD
 
 logger = get_logger(__name__)
 
 
-async def login_shopee(page, email: str, password: str):
+class ShopeeExtractor:
     """
-    Realiza login no portal da Shopee Logistics.
-    
-    Args:
-        page: Página do Playwright
-        email: Email de login
-        password: Senha de login
+    Extrator da Shopee usando API direta (sem browser)
     """
-    logger.info("Acessando portal da Shopee Logistics...")
-    portal_url = "https://logistics.myagencyservice.com.br/"
-    await page.goto(portal_url, wait_until="networkidle")
     
-    logger.info("Preenchendo credenciais...")
-    await page.locator('input[autocomplete="email"]').fill(email)
-    await page.locator('input[type="password"]').fill(password)
+    BASE_URL = "https://logistics.myagencyservice.com.br"
+    LOGIN_URL = f"{BASE_URL}/mgmt/api/pc/login"
+    EXPORT_URL = f"{BASE_URL}/mgmt/api/pc/agency/metric/lm/export_fleet_list_v2"
     
-    logger.info("Submetendo login...")
-    await page.locator('input[type="password"]').press("Enter")
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+            "Origin": self.BASE_URL,
+            "Referer": f"{self.BASE_URL}/",
+        })
     
-    # Aguardar confirmação de login
-    try:
-        await page.locator('text="Força de trabalho"').wait_for(timeout=30000)
-        logger.info("Login realizado com sucesso!")
-    except Exception:
-        await page.screenshot(path="erro_login.png")
-        logger.error("Falha no login. Verifique as credenciais.")
-        raise Exception("Falha no login. Consulte erro_login.png")
-
-
-async def navegar_para_monitoramento(page):
-    """
-    Navega até a tela de Monitoramento de Motoristas.
-    
-    Args:
-        page: Página do Playwright
-    """
-    logger.info("Navegando para Delivery Dashboard...")
-    dashboard_url = "https://logistics.myagencyservice.com.br/#/mgmtAgency/lm-hub"
-    await page.goto(dashboard_url, wait_until="domcontentloaded", timeout=60000)
-    await page.wait_for_timeout(5000)
-    
-    # Clicar em "Visão geral dos motoristas"
-    logger.info("Selecionando aba 'Visão geral dos motoristas'...")
-    try:
-        aba_motoristas = page.locator('span:has-text("Visão geral dos motoristas")')
-        await aba_motoristas.wait_for(timeout=20000)
-        await aba_motoristas.click()
-        logger.info("Aba selecionada!")
-    except Exception as e:
-        logger.warning(f"Aba já pode estar ativa: {e}")
-    
-    await page.wait_for_timeout(5000)
-    
-    # Garantir filtro "Total Expedido"
-    logger.info("Verificando filtro 'Total Expedido'...")
-    try:
-        filtro = page.locator('button:has-text("Total Expedido"), div:has-text("Total Expedido")')
-        await filtro.wait_for(timeout=5000)
-        is_active = await filtro.get_attribute('class')
-        if 'active' not in str(is_active).lower() and 'selected' not in str(is_active).lower():
-            logger.info("Clicando em 'Total Expedido'...")
-            await filtro.click()
-            await page.wait_for_timeout(2000)
-        else:
-            logger.info("Filtro 'Total Expedido' já ativo.")
-    except Exception as e:
-        logger.warning(f"Filtro não encontrado ou já ativo: {e}")
-
-
-async def baixar_csv(page, output_path: Path) -> Path:
-    """
-    Baixa o CSV de monitoramento de motoristas.
-    
-    Args:
-        page: Página do Playwright
-        output_path: Caminho para salvar o arquivo
+    def login(self, email: str, password: str) -> bool:
+        """
+        Realiza login no sistema e salva o cookie/token.
         
-    Returns:
-        Path: Caminho do arquivo baixado
-    """
-    logger.info("Procurando botão de Exportar...")
-    export_button = page.locator('button:has-text("Exportar")')
-    await export_button.wait_for(timeout=10000)
-    
-    logger.info("Iniciando download...")
-    async with page.expect_download(timeout=30000) as download_info:
-        await export_button.click()
-    
-    download = await download_info.value
-    
-    # Salvar na pasta data/raw
-    caminho_arquivo = output_path / download.suggested_filename
-    await download.save_as(caminho_arquivo)
-    logger.info(f"Arquivo baixado: {caminho_arquivo}")
-    
-    return caminho_arquivo
-
-
-def transformar_dados(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Transforma os dados extraindo ID do motorista do nome.
-    
-    Args:
-        df: DataFrame original
+        Args:
+            email: Email de login
+            password: Senha
+            
+        Returns:
+            bool: True se login sucesso
+        """
+        logger.info("Iniciando login...")
         
-    Returns:
-        DataFrame: DataFrame transformado
-    """
-    logger.info("Transformando dados...")
+        try:
+            # Payload de login (ajustar conforme necessário)
+            payload = {
+                "email": email,
+                "password": password,
+            }
+            
+            logger.info(f"Tentando login com email: {email}")
+            
+            response = self.session.post(
+                self.LOGIN_URL,
+                json=payload,
+                timeout=30
+            )
+            
+            logger.info(f"Status do login: {response.status_code}")
+            
+            if response.status_code == 200:
+                dados = response.json()
+                
+                # Verificar se login foi bem sucedido
+                if dados.get("success") or dados.get("token") or "JSESSIONID" in response.cookies:
+                    logger.info("✅ Login realizado com sucesso!")
+                    
+                    # Salvar cookies para próximas requisições
+                    logger.info(f"Cookies obtidos: {list(response.cookies.keys())}")
+                    
+                    return True
+            
+            # Tentar alternativa - talvez o login seja form-data
+            logger.warning("Tentando login como form-data...")
+            response = self.session.post(
+                self.LOGIN_URL,
+                data=payload,
+                timeout=30
+            )
+            
+            if response.status_code == 200 and "JSESSIONID" in response.cookies:
+                logger.info("✅ Login realizado com form-data!")
+                return True
+            
+            logger.error(f"Falha no login. Response: {response.text[:200]}")
+            return False
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Erro de rede no login: {e}")
+            return False
     
-    # Separar ID do nome (formato: [ID] Nome)
-    if 'Driver Name' in df.columns:
-        extracao = df['Driver Name'].str.extract(r'\[(.*?)\]\s*(.*)')
-        df.insert(0, 'driver_id', extracao[0])
-        df['Driver Name'] = extracao[1]
+    def baixar_export(self, output_path: Path) -> Path:
+        """
+        Baixa o arquivo de exportação da API.
         
-        # Tratar nulos
-        df['driver_id'] = df['driver_id'].fillna('')
-        df['Driver Name'] = df['Driver Name'].fillna('')
+        Args:
+            output_path: Pasta para salvar o arquivo
+            
+        Returns:
+            Path: Caminho do arquivo baixado
+        """
+        logger.info("Iniciando download da API...")
+        
+        try:
+            # Parâmetros da requisição (ajustar conforme necessário)
+            params = {
+                "type": "total_expedido",  # Filtro: Total Expedido
+                "timestamp": int(time.time() * 1000),  # Para evitar cache
+            }
+            
+            logger.info(f"URL: {self.EXPORT_URL}")
+            logger.info(f"Parâmetros: {params}")
+            
+            response = self.session.get(
+                self.EXPORT_URL,
+                params=params,
+                timeout=60
+            )
+            
+            logger.info(f"Status do download: {response.status_code}")
+            
+            if response.status_code == 200:
+                # Determinar nome do arquivo
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                
+                # Verificar Content-Disposition para nome do arquivo
+                content_disp = response.headers.get("Content-Disposition", "")
+                if "filename=" in content_disp:
+                    filename = content_disp.split("filename=")[1].strip('"\'')
+                else:
+                    filename = f"shopee_motoristas_{timestamp}.xlsx"
+                
+                caminho_arquivo = output_path / filename
+                
+                # Salvar arquivo
+                with open(caminho_arquivo, "wb") as f:
+                    f.write(response.content)
+                
+                logger.info(f"✅ Arquivo baixado: {caminho_arquivo}")
+                logger.info(f"Tamanho: {len(response.content)} bytes")
+                
+                return caminho_arquivo
+            else:
+                logger.error(f"Erro no download: {response.status_code}")
+                logger.error(f"Response: {response.text[:500]}")
+                raise Exception(f"Falha no download: {response.status_code}")
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Erro de rede no download: {e}")
+            raise
     
-    # Normalizar nomes das colunas
-    df.columns = (
-        df.columns
-        .str.replace('（', '(').str.replace('）', ')')
-        .str.strip()
-        .str.lower()
-        .str.replace(' ', '_')
-        .str.replace('(#)', '_qtd', regex=False)
-        .str.replace('(%)', '_perc', regex=False)
-        .str.replace('(', '').str.replace(')', '')
-        .str.replace('-', '_')
-        .str.replace('__', '_')
-        .str.strip('_')
-    )
-    
-    # Corrigir nome problemático
-    if 'expected_delivered_percentage_perc' in df.columns:
-        df = df.rename(columns={'expected_delivered_percentage_perc': 'expected_delivered_percentage'})
-        logger.info("Corrigido: expected_delivered_percentage_perc -> expected_delivered_percentage")
-    
-    # Log de totais
-    logger.info("\n=== TOTAIS EXTRAÍDOS ===")
-    if 'assigned' in df.columns:
-        logger.info(f"Total Assigned: {df['assigned'].sum()}")
-    if 'handed_over' in df.columns:
-        logger.info(f"Total Handed Over: {df['handed_over'].sum()}")
-    if 'delivered_qtd' in df.columns:
-        logger.info(f"Total Delivered: {df['delivered_qtd'].sum()}")
-    if 'on_hold' in df.columns:
-        logger.info(f"Total On-Hold: {df['on_hold'].sum()}")
-    if 'delivering_qtd' in df.columns:
-        logger.info(f"Total Delivering: {df['delivering_qtd'].sum()}")
-    logger.info(f"Total Motoristas: {len(df)}")
-    logger.info("========================\n")
-    
-    return df
+    def close(self):
+        """Fecha a sessão"""
+        self.session.close()
 
 
-async def extract_shopee_monitoramento() -> Path:
+def extract_shopee_monitoramento() -> Path:
     """
     Extrai dados de monitoramento de motoristas da Shopee.
     
@@ -194,62 +175,76 @@ async def extract_shopee_monitoramento() -> Path:
     output_path = DATA_RAW_DIR / "shopee_monitoramento"
     output_path.mkdir(parents=True, exist_ok=True)
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    raw_file = output_path / f"raw_{timestamp}.xlsx"
-    processed_file = output_path / f"processed_{timestamp}.csv"
+    extractor = ShopeeExtractor()
     
-    headless = os.environ.get("CRAWLER_HEADLESS", "true").lower() == "true"
-    
-    async with async_playwright() as p:
-        logger.info(f"Iniciando navegador (Headless: {headless})...")
-        browser = await p.chromium.launch(
-            headless=headless,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ]
+    try:
+        # Login
+        if not extractor.login(SHOPEE_EMAIL, SHOPEE_PWD):
+            raise Exception("Falha no login. Verifique email e senha.")
+        
+        # Aguardar um pouco após login
+        time.sleep(2)
+        
+        # Baixar arquivo
+        arquivo_baixado = extractor.baixar_export(output_path)
+        
+        # Ler e transformar dados
+        logger.info("Lendo arquivo Excel...")
+        import pandas as pd
+        df = pd.read_excel(arquivo_baixado)
+        
+        # Transformar (separar ID do nome)
+        logger.info("Transformando dados...")
+        if 'Driver Name' in df.columns:
+            extracao = df['Driver Name'].str.extract(r'\[(.*?)\]\s*(.*)')
+            df.insert(0, 'driver_id', extracao[0])
+            df['Driver Name'] = extracao[1]
+            df['driver_id'] = df['driver_id'].fillna('')
+            df['Driver Name'] = df['Driver Name'].fillna('')
+        
+        # Normalizar nomes das colunas
+        df.columns = (
+            df.columns
+            .str.replace('（', '(').str.replace('）', ')')
+            .str.strip()
+            .str.lower()
+            .str.replace(' ', '_')
+            .str.replace('(#)', '_qtd', regex=False)
+            .str.replace('(%)', '_perc', regex=False)
+            .str.replace('(', '').str.replace(')', '')
+            .str.replace('-', '_')
+            .str.replace('__', '_')
+            .str.strip('_')
         )
         
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-            locale="pt-BR",
-            viewport={"width": 1920, "height": 1080},
-        )
-        page = await context.new_page()
+        # Corrigir nome problemático
+        if 'expected_delivered_percentage_perc' in df.columns:
+            df = df.rename(columns={'expected_delivered_percentage_perc': 'expected_delivered_percentage'})
         
-        try:
-            # Login
-            await login_shopee(page, SHOPEE_EMAIL, SHOPEE_PWD)
-            
-            # Navegar até a tela
-            await navegar_para_monitoramento(page)
-            
-            # Baixar arquivo
-            arquivo_baixado = await baixar_csv(page, output_path)
-            
-            # Ler e transformar dados
-            logger.info("Lendo arquivo Excel...")
-            df = pd.read_excel(arquivo_baixado)
-            
-            # Transformar
-            df_transformado = transformar_dados(df)
-            
-            # Salvar processado
-            df_transformado.to_csv(processed_file, index=False)
-            logger.info(f"Dados processados salvos em: {processed_file}")
-            
-            return processed_file
-            
-        except Exception as e:
-            logger.error(f"[FALHA] Motivo: {e}")
-            await page.screenshot(path="erro_crawler.png")
-            logger.error("Consulte 'erro_crawler.png'")
-            raise
-        finally:
-            logger.info("Fechando navegador...")
-            await browser.close()
+        # Adicionar timestamp
+        df['extracted_at'] = datetime.now()
+        
+        # Salvar processado
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        processed_file = output_path / f"processed_{timestamp}.csv"
+        df.to_csv(processed_file, index=False)
+        logger.info(f"Dados processados salvos em: {processed_file}")
+        
+        # Log de totais
+        logger.info("\n=== TOTAIS EXTRAÍDOS ===")
+        if 'assigned' in df.columns:
+            logger.info(f"Total Assigned: {df['assigned'].sum()}")
+        if 'handed_over' in df.columns:
+            logger.info(f"Total Handed Over: {df['handed_over'].sum()}")
+        if 'delivered_qtd' in df.columns:
+            logger.info(f"Total Delivered: {df['delivered_qtd'].sum()}")
+        logger.info(f"Total Motoristas: {len(df)}")
+        logger.info("========================\n")
+        
+        return processed_file
+        
+    finally:
+        extractor.close()
 
 
 async def run():
@@ -257,7 +252,7 @@ async def run():
     Função principal para executar o crawler.
     """
     try:
-        arquivo_processado = await extract_shopee_monitoramento()
+        arquivo_processado = extract_shopee_monitoramento()
         logger.info(f"✅ Extração concluída: {arquivo_processado}")
         return str(arquivo_processado)
     except Exception as e:
@@ -266,4 +261,5 @@ async def run():
 
 
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(run())
