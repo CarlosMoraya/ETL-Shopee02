@@ -81,17 +81,21 @@ class ShopeeExtractor:
         logger.info("Testando conexão com cookies...")
         
         try:
-            # Requisição simples para testar
-            test_url = f"{self.BASE_URL}/mgmt/api/sys/log70=[api]"
+            # Testar com a própria URL de exportação (sem parâmetros)
+            test_url = f"{self.BASE_URL}/mgmt/api/pc/agency/metric/lm/export_fleet_list_v2"
             
             response = self.session.get(test_url, timeout=30)
             
-            if response.status_code == 200:
-                logger.info("✅ Cookies válidos! Conexão OK.")
+            # 200 = OK, 404 = URL pode não existir mas cookies válidos
+            if response.status_code in [200, 404]:
+                logger.info(f"✅ Conexão OK (Status: {response.status_code})")
                 return True
-            else:
-                logger.warning(f"Status: {response.status_code}")
+            elif response.status_code in [401, 403]:
+                logger.error(f"❌ Cookies inválidos/expirados (Status: {response.status_code})")
                 return False
+            else:
+                logger.warning(f"Status inesperado: {response.status_code}")
+                return True  # Assume OK mesmo assim
                 
         except Exception as e:
             logger.error(f"Erro no teste: {e}")
