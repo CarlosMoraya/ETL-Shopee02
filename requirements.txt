@@ -1,5 +1,5 @@
-# Playwright
-playwright==1.40.0
+# Playwright (versão compatível com Ubuntu 24.04)
+playwright==1.42.0
 
 # Pandas e processamento de dados
 pandas==2.1.4
