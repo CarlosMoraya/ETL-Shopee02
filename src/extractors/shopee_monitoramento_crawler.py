@@ -261,13 +261,15 @@ async def extract_shopee_monitoramento() -> Path:
         extractor.close()
 
 
-if __name__ == "__main__":
-    async def run():
-        try:
-            arquivo_processado = await extract_shopee_monitoramento()
-            logger.info(f"✅ Extração concluída: {arquivo_processado}")
-        except Exception as e:
-            logger.error(f"❌ Falha na extração: {e}")
-            raise
+async def run():
+    try:
+        arquivo_processado = await extract_shopee_monitoramento()
+        logger.info(f"✅ Extração concluída: {arquivo_processado}")
+        return str(arquivo_processado)
+    except Exception as e:
+        logger.error(f"❌ Falha na extração: {e}")
+        raise
 
+
+if __name__ == "__main__":
     asyncio.run(run())
