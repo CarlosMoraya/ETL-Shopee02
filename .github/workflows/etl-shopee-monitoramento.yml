@@ -23,32 +23,21 @@ jobs:
           python-version: '3.11'
           cache: ''  # Desabilitar cache
 
-      - name: Limpar ambiente e instalar dependências
+      - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
-          pip uninstall -y playwright selenium 2>/dev/null || true
-          pip cache purge 2>/dev/null || true
           pip install --no-cache-dir -r requirements.txt
           echo "=== Dependências instaladas ==="
-          pip list | grep -E "playwright|selenium|requests|pandas" || true
+          pip list | grep -E "playwright|requests|pandas" || true
+
+      - name: Instalar browsers do Playwright
+        run: playwright install chromium --with-deps
 
       - name: Rodar Pipeline ETL
         env:
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
-          # Cookies de autenticação Shopee
-          SHOPEE_FMS_USER_SKEY: ${{ secrets.SHOPEE_FMS_USER_SKEY }}
-          SHOPEE_SPX_UK: ${{ secrets.SHOPEE_SPX_UK }}
-          SHOPEE_FMS_USER_ID: ${{ secrets.SHOPEE_FMS_USER_ID }}
-          SHOPEE_FMS_DISPLAY_NAME: ${{ secrets.SHOPEE_FMS_DISPLAY_NAME }}
-          SHOPEE_FMS_USER_AGENCY_ID: ${{ secrets.SHOPEE_FMS_USER_AGENCY_ID }}
-          SHOPEE_SPX_AGID: ${{ secrets.SHOPEE_SPX_AGID }}
-          SHOPEE_SPX_CID: ${{ secrets.SHOPEE_SPX_CID }}
-          SHOPEE_SPX_DN: ${{ secrets.SHOPEE_SPX_DN }}
-          SHOPEE_SPX_ST: ${{ secrets.SHOPEE_SPX_ST }}
-          SHOPEE_SPX_UID: ${{ secrets.SHOPEE_SPX_UID }}
-          SHOPEE_ADMIN_DEVICE_ID: ${{ secrets.SHOPEE_ADMIN_DEVICE_ID }}
-          SHOPEE_ADMIN_LANG: ${{ secrets.SHOPEE_ADMIN_LANG }}
-          SHOPEE_SSC_USER_ROLE: ${{ secrets.SHOPEE_SSC_USER_ROLE }}
+          SHOPEE_EMAIL: ${{ secrets.SHOPEE_EMAIL }}
+          SHOPEE_PWD: ${{ secrets.SHOPEE_PWD }}
         run: |
           python -m src.pipelines.shopee_monitoramento_pipeline
 
