@@ -145,12 +145,29 @@ class ShopeeExtractor:
             if response.status_code == 200:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+                content_type = response.headers.get("Content-Type", "")
                 content_disp = response.headers.get("Content-Disposition", "")
-                if "filename=" in content_disp:
-                    filename = content_disp.split("filename=")[1].strip('"\'')
-                else:
-                    filename = f"shopee_motoristas_{timestamp}.xlsx"
+                logger.info(f"Content-Type: {content_type}")
+                logger.info(f"Content-Disposition: {content_disp}")
+                logger.info(f"Primeiros bytes: {response.content[:20]}")
 
+                # Determinar extensão pelo Content-Type
+                if "csv" in content_type:
+                    ext = ".csv"
+                elif "spreadsheet" in content_type or "excel" in content_type:
+                    ext = ".xlsx"
+                elif content_disp and "filename=" in content_disp:
+                    nome = content_disp.split("filename=")[1].strip('"\'')
+                    ext = Path(nome).suffix or ".xlsx"
+                else:
+                    # Detectar pelo magic bytes
+                    magic = response.content[:4]
+                    if magic == b'PK\x03\x04':  # ZIP/XLSX
+                        ext = ".xlsx"
+                    else:
+                        ext = ".csv"
+
+                filename = f"shopee_motoristas_{timestamp}{ext}"
                 caminho_arquivo = output_path / filename
 
                 with open(caminho_arquivo, "wb") as f:
@@ -202,9 +219,13 @@ def extract_shopee_monitoramento() -> Path:
         arquivo_baixado = extractor.baixar_export(output_path)
 
         # Ler e transformar dados
-        logger.info("Lendo arquivo Excel...")
         import pandas as pd
-        df = pd.read_excel(arquivo_baixado)
+        sufixo = Path(arquivo_baixado).suffix.lower()
+        logger.info(f"Lendo arquivo ({sufixo}): {arquivo_baixado}")
+        if sufixo == ".csv":
+            df = pd.read_csv(arquivo_baixado)
+        else:
+            df = pd.read_excel(arquivo_baixado, engine='openpyxl')
 
         # Transformar (separar ID do nome)
         logger.info("Transformando dados...")
