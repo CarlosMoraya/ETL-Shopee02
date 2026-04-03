@@ -148,6 +148,14 @@ async def extract_shopee_driver_profile() -> Path:
             if not painel_aberto:
                 logger.warning("Painel de tarefas não encontrado — tentando localizar 'Baixar' diretamente")
 
+            # Screenshot imediatamente após abrir painel
+            await page.screenshot(path=str(output_path / "painel_aberto.png"), full_page=True)
+            logger.info("Screenshot do painel salvo: painel_aberto.png")
+
+            # Log do HTML do painel para ver o que está visível
+            html_painel = await page.content()
+            logger.info(f"HTML painel (últimos 3000 chars):\n{html_painel[-3000:]}")
+
             # 7. AGUARDAR "BAIXAR"
             logger.info("Aguardando botão 'Baixar' ficar disponível (até 120s)...")
             caminho_arquivo = None
