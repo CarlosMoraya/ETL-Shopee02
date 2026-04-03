@@ -124,7 +124,31 @@ async def extract_shopee_driver_profile() -> Path:
             logger.info("Exportação solicitada — aguardando processamento...")
             await page.wait_for_timeout(5_000)
 
-            # 6. ABRIR PAINEL DE TAREFAS E AGUARDAR "BAIXAR"
+            # 6. ABRIR PAINEL DE TAREFAS DE EXPORTAÇÃO
+            # O botão "Baixar" só aparece depois de abrir este painel
+            logger.info("Abrindo painel de tarefas de exportação...")
+            painel_aberto = False
+            for seletor, nome in [
+                ('.anticon-file, .ssc-icon-file, [class*="task-icon"], svg[class*="file"]', "ícone de tarefas"),
+                ('.anticon-bell, .ssc-icon-bell, [class*="bell"]', "ícone de notificações"),
+                ('text=Export History', "Export History"),
+                ('text=Histórico de Exportação', "Histórico de Exportação"),
+            ]:
+                try:
+                    el = page.locator(seletor).first
+                    await el.wait_for(timeout=5_000)
+                    await el.click()
+                    logger.info(f"Painel aberto via: {nome}")
+                    await page.wait_for_timeout(3_000)
+                    painel_aberto = True
+                    break
+                except Exception:
+                    pass
+
+            if not painel_aberto:
+                logger.warning("Painel de tarefas não encontrado — tentando localizar 'Baixar' diretamente")
+
+            # 7. AGUARDAR "BAIXAR"
             logger.info("Aguardando botão 'Baixar' ficar disponível (até 120s)...")
             caminho_arquivo = None
 
@@ -137,6 +161,7 @@ async def extract_shopee_driver_profile() -> Path:
                     break
                 if (tentativa + 1) % 15 == 0:
                     logger.info(f"Aguardando processamento... ({tentativa + 1}/120s)")
+                    await page.screenshot(path=str(output_path / f"aguardando_{tentativa+1}s.png"))
             else:
                 await page.screenshot(path=str(output_path / "erro_timeout_download.png"))
                 raise Exception("Timeout: export não ficou pronto em 120s.")
