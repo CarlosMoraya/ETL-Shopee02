@@ -31,7 +31,10 @@ jobs:
           pip list | grep -E "playwright|requests|pandas" || true
 
       - name: Instalar browsers do Playwright
-        run: playwright install chromium --with-deps
+        run: |
+          # Ubuntu 24.04 renomeou libasound2 -> libasound2t64
+          sudo apt-get install -y libasound2t64 2>/dev/null || true
+          playwright install chromium --with-deps
 
       - name: Rodar Pipeline ETL
         env:

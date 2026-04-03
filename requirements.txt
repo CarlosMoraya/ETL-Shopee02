@@ -1,6 +1,6 @@
 # HTTP e Web Scraping
 requests==2.31.0
-playwright==1.44.0
+playwright==1.49.1
 
 # Pandas e processamento de dados
 pandas==2.1.4
