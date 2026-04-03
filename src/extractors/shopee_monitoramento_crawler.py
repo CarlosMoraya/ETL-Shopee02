@@ -60,12 +60,30 @@ async def fazer_login_e_obter_cookies() -> dict:
             # Screenshot de diagnóstico — mostra o que carregou
             screenshot_pre = DATA_RAW_DIR / "login_pre.png"
             screenshot_pre.parent.mkdir(parents=True, exist_ok=True)
-            await page.screenshot(path=str(screenshot_pre))
+            await page.screenshot(path=str(screenshot_pre), full_page=True)
             logger.info(f"Screenshot pré-login salvo: {screenshot_pre}")
 
-            # Log da URL atual e todos os inputs visíveis
             logger.info(f"URL atual: {page.url}")
+
+            # Log do HTML para diagnóstico
+            html = await page.content()
+            logger.info(f"HTML (primeiros 3000 chars):\n{html[:3000]}")
+
+            # Log de iframes
+            frames = page.frames
+            logger.info(f"Total de frames: {len(frames)}")
+            for i, frame in enumerate(frames):
+                logger.info(f"  Frame {i}: url={frame.url}")
+
+            # Aguardar qualquer input aparecer (SPA pode demorar a renderizar)
+            logger.info("Aguardando formulário renderizar...")
+            try:
+                await page.wait_for_selector("input", timeout=15_000)
+            except Exception:
+                logger.warning("Nenhum input apareceu em 15s — tentando mesmo assim")
+
             inputs = await page.locator("input").all()
+            logger.info(f"Inputs encontrados: {len(inputs)}")
             for inp in inputs:
                 tipo = await inp.get_attribute("type") or ""
                 nome = await inp.get_attribute("name") or ""
