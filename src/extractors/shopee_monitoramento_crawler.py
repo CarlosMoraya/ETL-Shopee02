@@ -120,9 +120,14 @@ class ShopeeExtractor:
         logger.info("Iniciando download da API...")
         
         try:
-            # A API usa POST, não GET!
+            # Payload correto capturado do DevTools
             payload = {
-                "type": "total_expedido",
+                "agency_name": "DELUNA",
+                "first_delivering_start": None,
+                "first_delivering_end": None,
+                "delivered_pct_end": None,
+                "delivered_pct_start": None,
+                "view_mode": 1,
             }
 
             logger.info(f"URL: {self.EXPORT_URL}")
