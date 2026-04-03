@@ -41,46 +41,64 @@ async def fazer_login_e_obter_cookies() -> dict:
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--window-size=1920,1080",
+            ],
         )
         context = await browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/119.0.0.0 Safari/537.36"
+                "Chrome/124.0.0.0 Safari/537.36"
             ),
             locale="pt-BR",
+            timezone_id="America/Sao_Paulo",
+            viewport={"width": 1920, "height": 1080},
+        )
+        # Remove a flag webdriver que delata automação
+        await context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
         page = await context.new_page()
 
         try:
-            logger.info(f"Abrindo página de login: {LOGIN_PAGE_URL}")
-            await page.goto(LOGIN_PAGE_URL, wait_until="networkidle", timeout=60_000)
+            # Entrar pelo portal logístico — Shopee redireciona para login naturalmente
+            logger.info(f"Abrindo portal: {BASE_URL}")
+            await page.goto(BASE_URL, wait_until="domcontentloaded", timeout=60_000)
 
-            # Screenshot de diagnóstico — mostra o que carregou
+            # Aguardar redirect para a página de login
+            logger.info("Aguardando redirect para login...")
+            await page.wait_for_url(f"{LOGIN_PAGE_URL}/**", timeout=30_000)
+            await page.wait_for_load_state("networkidle", timeout=30_000)
+
+            # Screenshot de diagnóstico
             screenshot_pre = DATA_RAW_DIR / "login_pre.png"
             screenshot_pre.parent.mkdir(parents=True, exist_ok=True)
             await page.screenshot(path=str(screenshot_pre), full_page=True)
             logger.info(f"Screenshot pré-login salvo: {screenshot_pre}")
-
             logger.info(f"URL atual: {page.url}")
 
-            # Log do HTML para diagnóstico
-            html = await page.content()
-            logger.info(f"HTML (primeiros 3000 chars):\n{html[:3000]}")
-
-            # Log de iframes
-            frames = page.frames
-            logger.info(f"Total de frames: {len(frames)}")
-            for i, frame in enumerate(frames):
-                logger.info(f"  Frame {i}: url={frame.url}")
-
-            # Aguardar qualquer input aparecer (SPA pode demorar a renderizar)
+            # Aguardar formulário renderizar (React SPA)
             logger.info("Aguardando formulário renderizar...")
             try:
-                await page.wait_for_selector("input", timeout=15_000)
+                await page.wait_for_selector("input", timeout=30_000)
             except Exception:
-                logger.warning("Nenhum input apareceu em 15s — tentando mesmo assim")
+                logger.warning("Nenhum input apareceu em 30s")
+                html = await page.content()
+                logger.info(f"HTML (primeiros 2000 chars):\n{html[:2000]}")
+
+            inputs = await page.locator("input").all()
+            logger.info(f"Inputs encontrados: {len(inputs)}")
+            for inp in inputs:
+                tipo = await inp.get_attribute("type") or ""
+                nome = await inp.get_attribute("name") or ""
+                id_ = await inp.get_attribute("id") or ""
+                placeholder = await inp.get_attribute("placeholder") or ""
+                logger.info(f"  input: type={tipo!r} name={nome!r} id={id_!r} placeholder={placeholder!r}")
 
             inputs = await page.locator("input").all()
             logger.info(f"Inputs encontrados: {len(inputs)}")
