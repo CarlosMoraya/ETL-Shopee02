@@ -2,8 +2,9 @@ name: ETL Shopee - Monitoramento (15 min)
 
 on:
   schedule:
-    # Roda a cada 15 minutos: 0, 15, 30, 45 de cada hora
-    - cron: '*/15 * * * *'
+    # Roda a cada 15 minutos das 06h às 23h59 (horário de Brasília / UTC-3)
+    # Não roda das 00h às 05h59 BRT (= 03h às 08h59 UTC)
+    - cron: '*/15 0-2,9-23 * * *'
   workflow_dispatch:
     # Permite trigger manual
 
