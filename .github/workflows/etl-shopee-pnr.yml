@@ -2,8 +2,8 @@ name: ETL Shopee - Ticket PNR (Diário)
 
 on:
   schedule:
-    # Roda todo dia às 06h00 BRT (= 09h UTC)
-    - cron: '0 9 * * *'
+    # Roda 2x ao dia: 12h00 BRT (= 15h UTC) e 18h00 BRT (= 21h UTC)
+    - cron: '0 15,21 * * *'
   workflow_dispatch:
 
 jobs:

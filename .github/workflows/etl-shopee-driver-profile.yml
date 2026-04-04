@@ -2,8 +2,8 @@ name: ETL Shopee - Perfil do Motorista (Diário)
 
 on:
   schedule:
-    # Roda todo dia às 06h00 BRT (= 09h UTC)
-    - cron: '0 9 * * *'
+    # Roda 1x ao dia às 00h00 BRT (= 03h UTC)
+    - cron: '0 3 * * *'
   workflow_dispatch:
 
 jobs:
