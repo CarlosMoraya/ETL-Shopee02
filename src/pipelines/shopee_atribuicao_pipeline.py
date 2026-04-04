@@ -87,6 +87,9 @@ async def run_pipeline(table_name: str = TABLE_NAME):
         logger.info("\n📤 FASE 3: CARGA")
         primeira_carga = not tabela_existe(table_name)
 
+        if not primeira_carga:
+            garantir_unique_constraint(table_name, CONFLICT_COLUMNS[0])
+
         if primeira_carga:
             logger.info("Primeira carga — criando tabela com replace...")
             rows_inserted = load_to_neon(
@@ -110,8 +113,6 @@ async def run_pipeline(table_name: str = TABLE_NAME):
                     schema="public",
                     conflict_columns=cols_conflito,
                 )
-
-        garantir_unique_constraint(table_name, CONFLICT_COLUMNS[0])
 
         logger.info("\n" + "=" * 80)
         logger.info("✅ PIPELINE CONCLUÍDO COM SUCESSO!")
