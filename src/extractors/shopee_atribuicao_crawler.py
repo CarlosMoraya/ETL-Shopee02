@@ -109,14 +109,26 @@ async def extract_shopee_atribuicao() -> Path:
                 logger.warning(f"Dropdown de seleção não encontrado: {e}")
                 await page.screenshot(path=str(output_path / "erro_select_all_pages.png"))
 
-            # 4. CLICAR EM "EXPORTAR AT"
+            # 4. REGISTRAR EXPORTS EXISTENTES antes de disparar novo export
+            HISTORY_URL = (
+                "https://logistics.myagencyservice.com.br"
+                "/api/delivery/agency/assignment/assignment_task/export/history"
+            )
+            logger.info("Registrando exports existentes antes de disparar novo export...")
+            hist_antes = await page.request.get(HISTORY_URL, timeout=30_000)
+            hist_json = await hist_antes.json()
+            existing_task_ids = {
+                e["task_id"] for e in hist_json.get("data", {}).get("exports", [])
+            }
+            logger.info(f"Task IDs existentes: {existing_task_ids}")
+
+            # 5. CLICAR EM "EXPORTAR AT"
             logger.info("Clicando em 'Exportar AT'...")
             try:
                 botao_exportar = page.locator('button:has-text("Exportar AT")').first
                 await botao_exportar.wait_for(timeout=10_000)
                 await botao_exportar.click()
             except Exception:
-                # Fallback: tenta somente "Exportar"
                 botao_exportar = page.locator('button:has-text("Exportar")').first
                 await botao_exportar.wait_for(timeout=10_000)
                 await botao_exportar.click()
@@ -131,166 +143,55 @@ async def extract_shopee_atribuicao() -> Path:
                 await opcoes.nth(1).click()
                 await page.wait_for_timeout(2_000)
 
-            logger.info("Exportação solicitada — aguardando 90s para processamento do servidor...")
-            await page.wait_for_timeout(90_000)
+            logger.info("Exportação solicitada — aguardando novo export ficar pronto (polling)...")
 
-            # 5. ABRIR PAINEL "ÚLTIMA TAREFA" via ícone de tarefas no header
-            logger.info("Abrindo painel 'Última tarefa' via ícone de tarefas...")
-            painel_aberto = False
-            for tentativa_painel in range(4):
-                try:
-                    icone = page.locator('div[data-v-13320df0].icon').first
-                    await icone.wait_for(timeout=5_000)
-                    await icone.click()
-                    await page.wait_for_timeout(3_000)
-                    await page.screenshot(path=str(output_path / f"painel_tentativa_{tentativa_painel}.png"))
-                    painel_aberto = True
-                    logger.info(f"✅ Painel aberto (tentativa {tentativa_painel + 1})")
-                    break
-                except Exception as e:
-                    logger.warning(f"Tentativa {tentativa_painel + 1} — ícone não encontrado: {e}")
-                    await page.wait_for_timeout(30_000)
-
-            if not painel_aberto:
-                await page.screenshot(path=str(output_path / "erro_painel.png"))
-                raise Exception("Não foi possível abrir o painel 'Última tarefa'.")
-
-            # 6. AGUARDAR BOTÃO "BAIXAR" NO PAINEL (reabrindo para atualizar status)
-            logger.info("Aguardando botão 'Baixar' no painel...")
+            # 6. POLLING DO HISTORY API até aparecer novo task_id com status=2 (concluído)
+            # Aguarda até 15 minutos (60 tentativas × 15s)
+            novo_export = None
             caminho_arquivo = None
-            encontrado = False
-            botao_baixar = None
-
-            for tentativa_baixar in range(8):
-                botao_baixar = page.locator('button:has-text("Baixar"), button:has-text("Download")').first
-                try:
-                    await botao_baixar.wait_for(timeout=30_000)
-                    logger.info(f"✅ Botão 'Baixar' encontrado (tentativa {tentativa_baixar + 1})!")
-                    encontrado = True
-                    break
-                except Exception:
-                    elapsed_extra = (tentativa_baixar + 1) * 30
-                    logger.info(f"Não visível ainda — reabrindo painel para atualizar ({elapsed_extra}s extra)...")
-                    await page.screenshot(path=str(output_path / f"aguardando_baixar_{elapsed_extra}s.png"))
-                    await page.keyboard.press("Escape")
-                    await page.wait_for_timeout(2_000)
-                    try:
-                        icone = page.locator('div[data-v-13320df0].icon').first
-                        await icone.wait_for(timeout=5_000)
-                        await icone.click()
-                        await page.wait_for_timeout(3_000)
-                    except Exception as e:
-                        logger.warning(f"Erro ao reabrir painel: {e}")
-
-            if not encontrado:
-                await page.screenshot(path=str(output_path / "erro_sem_baixar.png"))
-                raise Exception("Timeout: botão 'Baixar' não apareceu no painel após 240s adicionais.")
-
-            # 7. DOWNLOAD
-            # Estratégia dual: espera evento de download (60s) + fallback de download manual via URL
-            logger.info("Clicando em 'Baixar' no export mais recente...")
-            download_holder = {"value": None}
-            download_ready = asyncio.Event()
-            all_request_urls = []
-
-            async def on_download_event(dl):
-                if not download_ready.is_set():
-                    download_holder["value"] = dl
-                    download_ready.set()
-                    logger.info(f"Evento download capturado: {dl.suggested_filename}")
-
-            def on_any_request(req):
-                all_request_urls.append((req.resource_type, req.url))
-
-            async def on_new_page(np):
-                np.once("download", on_download_event)
-                np.on("request", on_any_request)
-
-            page.once("download", on_download_event)
-            context.on("page", on_new_page)
-            page.on("request", on_any_request)
-
-            await botao_baixar.click()
-            await page.wait_for_timeout(5_000)
-            await page.screenshot(path=str(output_path / "pos_clique_baixar.png"))
-
-            # Aguarda evento de download por 60s
-            try:
-                await asyncio.wait_for(download_ready.wait(), timeout=60)
-            except asyncio.TimeoutError:
-                pass
-            finally:
-                context.remove_listener("page", on_new_page)
-                page.remove_listener("request", on_any_request)
-
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-            if download_ready.is_set():
-                # Caminho feliz: evento de download capturado
-                download = download_holder["value"]
-                caminho_arquivo = output_path / f"shopee_atribuicao_{timestamp}_{download.suggested_filename}"
-                await download.save_as(str(caminho_arquivo))
-                logger.info(f"✅ Arquivo baixado via evento: {caminho_arquivo}")
-            else:
-                # Fallback: tenta baixar manualmente via URL capturada
-                logger.info(f"Evento não capturado. Requests após clique ({len(all_request_urls)}):")
-                for rtype, url in all_request_urls[-30:]:
-                    logger.info(f"  [{rtype}] {url}")
+            for tentativa in range(60):
+                await page.wait_for_timeout(15_000)
+                elapsed = (tentativa + 1) * 15
+                try:
+                    hist_resp = await page.request.get(HISTORY_URL, timeout=30_000)
+                    hist_json = await hist_resp.json()
+                    exports = hist_json.get("data", {}).get("exports", [])
+                    for exp in exports:
+                        if exp["task_id"] not in existing_task_ids and exp.get("status") == 2:
+                            novo_export = exp
+                            break
+                except Exception as e:
+                    logger.warning(f"Erro ao consultar history ({elapsed}s): {e}")
 
-                dl_url = next(
-                    (url for rtype, url in reversed(all_request_urls)
-                     if any(kw in url.lower() for kw in ['download', 'export', '.csv', '.xlsx', '.zip', 'file'])),
-                    None,
-                )
-                if dl_url:
-                    # A URL capturada pode ser um endpoint de API que retorna JSON com a URL real do arquivo
-                    logger.info(f"Consultando endpoint: {dl_url}")
-                    api_resp = await page.request.get(dl_url, timeout=30_000)
-                    if not api_resp.ok:
-                        raise Exception(f"Endpoint falhou — status {api_resp.status}: {dl_url}")
+                if novo_export:
+                    logger.info(f"✅ Novo export pronto após {elapsed}s — task_id={novo_export['task_id']}")
+                    break
+                logger.info(f"Aguardando processamento... {elapsed}s decorridos")
 
-                    content_type = api_resp.headers.get("content-type", "")
-                    logger.info(f"Content-Type da resposta: {content_type}")
+            if not novo_export:
+                raise Exception("Timeout: novo export não ficou pronto em 15 minutos.")
 
-                    if "json" in content_type:
-                        # É JSON com lista de tarefas de export
-                        # Estrutura: {"data": {"exports": [{"filename": "downloads/export/.../arquivo.csv", ...}]}}
-                        resp_json = await api_resp.json()
-                        logger.info(f"Resposta JSON: {str(resp_json)[:500]}")
+            # 7. DOWNLOAD direto via URL do history
+            filename_relativo = novo_export.get("filename", "")
+            if not filename_relativo:
+                raise Exception(f"Campo 'filename' vazio no export: {novo_export}")
 
-                        exports = resp_json.get("data", {}).get("exports", [])
-                        if not exports:
-                            raise Exception(f"Nenhuma tarefa de export encontrada no JSON: {resp_json}")
+            file_url = f"{PORTAL_URL.rstrip('/')}/{filename_relativo.lstrip('/')}"
+            logger.info(f"Baixando arquivo: {file_url}")
 
-                        # Pega o export mais recente (primeiro da lista, ordenado por ctime desc)
-                        filename_relativo = exports[0].get("filename", "")
-                        if not filename_relativo:
-                            raise Exception(f"Campo 'filename' vazio no export: {exports[0]}")
+            file_resp = await page.request.get(file_url, timeout=300_000)
+            if not file_resp.ok:
+                raise Exception(f"Download falhou — status {file_resp.status}: {file_url}")
 
-                        file_url = f"{PORTAL_URL.rstrip('/')}/{filename_relativo.lstrip('/')}"
-                        logger.info(f"URL real do arquivo: {file_url}")
-
-                        file_resp = await page.request.get(file_url, timeout=300_000)
-                        if not file_resp.ok:
-                            raise Exception(f"Download do arquivo falhou — status {file_resp.status}: {file_url}")
-                        content_type = file_resp.headers.get("content-type", "")
-                        ext = Path(filename_relativo).suffix or (
-                            ".zip" if "zip" in content_type else ".csv" if "csv" in content_type else ".xlsx"
-                        )
-                        caminho_arquivo = output_path / f"shopee_atribuicao_{timestamp}{ext}"
-                        caminho_arquivo.write_bytes(await file_resp.body())
-                        logger.info(f"✅ Arquivo baixado via JSON: {caminho_arquivo}")
-                    else:
-                        # Resposta já é o arquivo direto
-                        ext = ".zip" if "zip" in content_type else ".csv" if "csv" in content_type else ".xlsx"
-                        caminho_arquivo = output_path / f"shopee_atribuicao_{timestamp}{ext}"
-                        caminho_arquivo.write_bytes(await api_resp.body())
-                        logger.info(f"✅ Arquivo baixado diretamente: {caminho_arquivo}")
-                else:
-                    raise Exception(
-                        "Timeout: nem evento de download nem URL de download capturados. "
-                        f"Requests detectadas: {[u for _, u in all_request_urls[-10:]]}"
-                    )
+            content_type = file_resp.headers.get("content-type", "")
+            ext = Path(filename_relativo).suffix or (
+                ".zip" if "zip" in content_type else ".csv" if "csv" in content_type else ".xlsx"
+            )
+            caminho_arquivo = output_path / f"shopee_atribuicao_{timestamp}{ext}"
+            caminho_arquivo.write_bytes(await file_resp.body())
+            logger.info(f"✅ Arquivo baixado: {caminho_arquivo}")
 
         finally:
             await browser.close()
