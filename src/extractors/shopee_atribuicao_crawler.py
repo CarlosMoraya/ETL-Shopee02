@@ -137,25 +137,28 @@ async def extract_shopee_atribuicao() -> Path:
             }
             logger.info(f"Task IDs existentes: {existing_task_ids}")
 
-            # 5. DISPARAR EXPORT — capturar TODOS os requests
-            logger.info("Configurando interceptação de TODOS os requests...")
-            all_requests = []
+            # 5. DISPARAR EXPORT — usar page.route para interceptar requests
+            logger.info("Configurando interceptação de requests via page.route()...")
+            captured_requests = []
             
-            async def on_request(request):
-                all_requests.append({
+            async def handle_route(route, request):
+                captured_requests.append({
                     "url": request.url,
                     "method": request.method,
                     "resource_type": request.resource_type,
                     "post_data": request.post_data[:500] if request.post_data else None
                 })
+                # Deixar o request prosseguir normalmente
+                await route.continue_()
             
-            page.on("request", on_request)
+            # Interceptar TODOS os requests
+            await page.route("**/*", handle_route)
             
             logger.info("Clicando em 'Exportar AT'...")
             botao_exportar = page.locator('button:has-text("Exportar AT")').first
             await botao_exportar.wait_for(timeout=10_000)
             await botao_exportar.click()
-            await page.wait_for_timeout(8_000)
+            await page.wait_for_timeout(10_000)
 
             # Tratar modal de confirmação, se aparecer
             for seletor_confirmar in [
@@ -180,22 +183,18 @@ async def extract_shopee_atribuicao() -> Path:
             await page.wait_for_timeout(5_000)
             
             # Parar interceptação
-            page.remove_listener("request", on_request)
-            
-            # Log de TODOS os requests
-            logger.info(f"TOTAL de requests capturados: {len(all_requests)}")
-            for i, req in enumerate(all_requests):
-                logger.info(f"  [{i}] {req['method']} {req['url']} (type={req['resource_type']})")
-                if req.get('post_data'):
-                    logger.info(f"       POST: {req['post_data'][:300]}")
+            await page.unroute("**/*", handle_route)
             
             # Filtrar apenas requests XHR/fetch (API calls)
-            api_requests = [r for r in all_requests if r['resource_type'] in ('xhr', 'fetch')]
+            api_requests = [r for r in captured_requests if r['resource_type'] in ('xhr', 'fetch')]
+            logger.info(f"TOTAL de requests capturados: {len(captured_requests)}")
             logger.info(f"Requests de API (XHR/fetch): {len(api_requests)}")
-            for req in api_requests:
-                logger.info(f"  → {req['method']} {req['url']}")
+            
+            # Log apenas dos requests de API
+            for i, req in enumerate(api_requests):
+                logger.info(f"  [{i}] {req['method']} {req['url']}")
                 if req.get('post_data'):
-                    logger.info(f"     Payload: {req['post_data']}")
+                    logger.info(f"       POST: {req['post_data'][:300]}")
             
             await page.screenshot(path=str(output_path / "pos_exportar_at.png"))
 
@@ -212,14 +211,16 @@ async def extract_shopee_atribuicao() -> Path:
                 logger.info(f"✅ Export criado via clique: {novos_pos_clique[0]}")
             else:
                 logger.error("❌ Falha ao criar export — nenhum novo task_id detectado após clique no botão.")
-                logger.error(f"Total de requests capturados: {len(all_requests)}, API requests: {len(api_requests)}")
+                logger.error(f"Total de requests: {len(captured_requests)}, API requests: {len(api_requests)}")
                 
-                if not api_requests:
+                if api_requests:
+                    logger.error("Requests de API capturados:")
+                    for req in api_requests:
+                        logger.error(f"  → {req['method']} {req['url']}")
+                        if req.get('post_data'):
+                            logger.error(f"     Payload: {req['post_data']}")
+                else:
                     logger.error("NENHUM request de API foi capturado!")
-                    logger.error("Possíveis causas:")
-                    logger.error("  1. Botão não está sendo clicado corretamente")
-                    logger.error("  2. JavaScript da página está com erro")
-                    logger.error("  3. Página precisa de interação adicional")
                     
                     # Tentar avaliar JavaScript da página
                     logger.info("Avaliando estado da página via JavaScript...")
@@ -228,6 +229,9 @@ async def extract_shopee_atribuicao() -> Path:
                         logger.info(f"Título da página: {page_title}")
                         current_url = page.url
                         logger.info(f"URL atual: {current_url}")
+                        
+                        # Verificar se há erros de JavaScript no console
+                        logger.info("Verificando console errors...")
                     except Exception as e:
                         logger.error(f"Erro ao avaliar página: {e}")
                 
