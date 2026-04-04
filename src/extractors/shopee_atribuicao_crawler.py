@@ -197,27 +197,40 @@ async def extract_shopee_atribuicao() -> Path:
 
             # 4. CLICAR EM "EXPORTAR AT"
             logger.info("Clicando em 'Exportar AT'...")
-            botao_exportar = None
-            for seletor in [
-                'button.ssc-react-button:has-text("Exportar AT")',
-                'button:has-text("Exportar AT")',
-                'button:has-text("Exportar")',
-            ]:
-                try:
-                    botao_exportar = page.locator(seletor).first
-                    await botao_exportar.wait_for(timeout=10_000)
-                    logger.info(f"Botão Exportar AT encontrado: {seletor}")
-                    break
-                except Exception:
-                    continue
-
-            if botao_exportar:
-                await botao_exportar.click()
-                logger.info("✅ Botão 'Exportar AT' clicado.")
+            
+            # Tentar via JavaScript primeiro (mais confiável para este botão)
+            clicado = await page.evaluate("""() => {
+                const buttons = Array.from(document.querySelectorAll('button'));
+                const exportBtn = buttons.find(btn => btn.textContent.trim().startsWith('Exportar AT'));
+                if (exportBtn) {
+                    exportBtn.click();
+                    return true;
+                }
+                return false;
+            }""")
+            
+            if clicado:
+                logger.info("✅ Botão 'Exportar AT' clicado via JavaScript.")
             else:
-                logger.error("Botão 'Exportar AT' não encontrado!")
-                await page.screenshot(path=str(output_path / "erro_botao_exportar.png"))
-                raise Exception("Botão 'Exportar AT' não encontrado.")
+                # Fallback: tentar seletores Playwright
+                botao_exportar = None
+                for seletor in [
+                    'button:has-text("Exportar AT")',
+                    'button.ssc-react-button >> text="Exportar AT"',
+                ]:
+                    try:
+                        botao_exportar = page.locator(seletor).first
+                        await botao_exportar.wait_for(timeout=5_000)
+                        await botao_exportar.click()
+                        logger.info(f"✅ Botão clicado via seletor: {seletor}")
+                        break
+                    except Exception:
+                        continue
+                
+                if not botao_exportar:
+                    logger.error("Botão 'Exportar AT' não encontrado!")
+                    await page.screenshot(path=str(output_path / "erro_botao_exportar.png"))
+                    raise Exception("Botão 'Exportar AT' não encontrado.")
 
             # Aguardar 30 segundos para o export ser processado
             logger.info("Aguardando 30 segundos para processamento do export...")
