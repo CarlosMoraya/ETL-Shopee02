@@ -109,8 +109,39 @@ async def extract_shopee_atribuicao() -> Path:
             await botao_login.click()
 
             logger.info("Aguardando portal carregar após login...")
-            await page.locator('text="Força de trabalho"').wait_for(timeout=60_000)
-            logger.info("✅ Login confirmado!")
+            # A página de login redireciona direto para /#/agency-assignment/list
+            # Verificar se a página carregou corretamente
+            await page.wait_for_load_state("domcontentloaded", timeout=60_000)
+            await page.wait_for_timeout(5_000)
+            
+            # Tirar screenshot para debug
+            await page.screenshot(path=str(output_path / "pos_login.png"))
+            
+            # Verificar se estamos na página correta
+            current_url = page.url
+            logger.info(f"URL atual após login: {current_url}")
+            
+            # Confirmar login bem-sucedido verificando elementos da página
+            login_confirmado = False
+            for seletor in [
+                'text="Atribuição de Entrega"',
+                'text="Força de trabalho"',
+                'text="Entrega LM"',
+                '.nav-menu',
+                '.sidebar',
+                'table',
+            ]:
+                try:
+                    await page.locator(seletor).first.wait_for(timeout=10_000)
+                    logger.info(f"✅ Login confirmado — elemento '{seletor}' encontrado!")
+                    login_confirmado = True
+                    break
+                except Exception:
+                    pass
+            
+            if not login_confirmado:
+                logger.error(f"URL atual: {page.url}")
+                raise Exception("Login pode ter falhado — nenhum elemento esperado encontrado na página.")
 
             # 2. NAVEGAR PARA ATRIBUIÇÃO DE ENTREGA
             logger.info(f"Navegando para: {ATRIBUICAO_URL}")
