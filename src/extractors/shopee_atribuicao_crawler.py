@@ -248,37 +248,30 @@ async def extract_shopee_atribuicao() -> Path:
                     logger.info(f"Content-Type da resposta: {content_type}")
 
                     if "json" in content_type:
-                        # É JSON — procura a URL real do arquivo dentro da resposta
+                        # É JSON com lista de tarefas de export
+                        # Estrutura: {"data": {"exports": [{"filename": "downloads/export/.../arquivo.csv", ...}]}}
                         resp_json = await api_resp.json()
                         logger.info(f"Resposta JSON: {str(resp_json)[:500]}")
 
-                        # Busca recursiva por campos que contêm URL de download
-                        def encontrar_url(obj, keys=("url", "download_url", "file_url", "link", "file_path", "path")):
-                            if isinstance(obj, dict):
-                                for k in keys:
-                                    if k in obj and isinstance(obj[k], str) and obj[k].startswith("http"):
-                                        return obj[k]
-                                for v in obj.values():
-                                    result = encontrar_url(v, keys)
-                                    if result:
-                                        return result
-                            elif isinstance(obj, list):
-                                for item in obj:
-                                    result = encontrar_url(item, keys)
-                                    if result:
-                                        return result
-                            return None
+                        exports = resp_json.get("data", {}).get("exports", [])
+                        if not exports:
+                            raise Exception(f"Nenhuma tarefa de export encontrada no JSON: {resp_json}")
 
-                        file_url = encontrar_url(resp_json)
-                        if not file_url:
-                            raise Exception(f"URL de arquivo não encontrada no JSON: {resp_json}")
+                        # Pega o export mais recente (primeiro da lista, ordenado por ctime desc)
+                        filename_relativo = exports[0].get("filename", "")
+                        if not filename_relativo:
+                            raise Exception(f"Campo 'filename' vazio no export: {exports[0]}")
 
+                        file_url = f"{PORTAL_URL.rstrip('/')}/{filename_relativo.lstrip('/')}"
                         logger.info(f"URL real do arquivo: {file_url}")
+
                         file_resp = await page.request.get(file_url, timeout=300_000)
                         if not file_resp.ok:
-                            raise Exception(f"Download do arquivo falhou — status {file_resp.status}")
+                            raise Exception(f"Download do arquivo falhou — status {file_resp.status}: {file_url}")
                         content_type = file_resp.headers.get("content-type", "")
-                        ext = ".zip" if "zip" in content_type else ".csv" if "csv" in content_type else ".xlsx"
+                        ext = Path(filename_relativo).suffix or (
+                            ".zip" if "zip" in content_type else ".csv" if "csv" in content_type else ".xlsx"
+                        )
                         caminho_arquivo = output_path / f"shopee_atribuicao_{timestamp}{ext}"
                         caminho_arquivo.write_bytes(await file_resp.body())
                         logger.info(f"✅ Arquivo baixado via JSON: {caminho_arquivo}")
