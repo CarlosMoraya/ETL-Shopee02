@@ -181,11 +181,33 @@ async def extract_shopee_atribuicao() -> Path:
                 raise Exception("Timeout: botão 'Baixar' não apareceu no painel após 240s adicionais.")
 
             # 7. DOWNLOAD
+            # Registra handler no nível do contexto para capturar downloads
+            # tanto da página atual quanto de popups/novas abas abertas pelo botão Baixar
             logger.info("Clicando em 'Baixar' no export mais recente...")
-            async with page.expect_download(timeout=300_000) as download_info:
-                await botao_baixar.click()
+            download_holder = {"value": None}
+            download_ready = asyncio.Event()
 
-            download = await download_info.value
+            async def handle_download(dl):
+                if not download_ready.is_set():
+                    download_holder["value"] = dl
+                    download_ready.set()
+
+            async def handle_new_page(new_page):
+                new_page.once("download", handle_download)
+
+            page.once("download", handle_download)
+            context.on("page", handle_new_page)
+
+            await botao_baixar.click()
+
+            try:
+                await asyncio.wait_for(download_ready.wait(), timeout=300)
+            except asyncio.TimeoutError:
+                raise Exception("Timeout 300s aguardando evento de download — verifique se o servidor gerou o arquivo.")
+            finally:
+                context.remove_listener("page", handle_new_page)
+
+            download = download_holder["value"]
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             caminho_arquivo = output_path / f"shopee_atribuicao_{timestamp}_{download.suggested_filename}"
             await download.save_as(str(caminho_arquivo))
