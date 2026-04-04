@@ -19,7 +19,7 @@ from src.loader.neon_loader import create_neon_engine
 logger = get_logger(__name__)
 
 TABLE_NAME = "shopee_atribuicao"
-CONFLICT_COLUMNS = ["id_da_at"]
+CONFLICT_COLUMNS = ["assignment_task_id"]
 
 
 def tabela_existe(table_name: str, schema: str = "public") -> bool:

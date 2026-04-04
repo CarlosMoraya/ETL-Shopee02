@@ -102,7 +102,7 @@ async def extract_shopee_atribuicao() -> Path:
                 logger.info("Clicando em 'Select All in All Pages'...")
                 opcao_all_pages = page.locator('.ssc-react-table-selection-menu-item', has_text="Select All in All Pages")
                 await opcao_all_pages.wait_for(timeout=10_000)
-                await opcao_all_pages.click()
+                await opcao_all_pages.click(force=True)
                 await page.wait_for_timeout(2_000)
                 logger.info("✅ 'Select All in All Pages' selecionado.")
             except Exception as e:
