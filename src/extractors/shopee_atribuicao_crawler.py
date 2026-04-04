@@ -137,16 +137,29 @@ async def extract_shopee_atribuicao() -> Path:
             }
             logger.info(f"Task IDs existentes: {existing_task_ids}")
 
-            # 5. DISPARAR EXPORT — tentativa 1: via clique no botão
-            EXPORT_API_URL = (
-                "https://logistics.myagencyservice.com.br"
-                "/api/delivery/agency/assignment/assignment_task/export"
-            )
+            # 5. DISPARAR EXPORT — interceptar rede para descobrir endpoint correto
+            logger.info("Configurando interceptação de rede para capturar request de export...")
+            export_requests = []
+            
+            async def on_request(request):
+                if "export" in request.url.lower() or "assignment_task" in request.url.lower():
+                    export_requests.append({
+                        "url": request.url,
+                        "method": request.method,
+                        "headers": dict(request.headers),
+                        "post_data": request.post_data
+                    })
+                    logger.info(f"🔍 CAPTURADO: {request.method} {request.url}")
+                    if request.post_data:
+                        logger.info(f"   POST data: {request.post_data[:500]}")
+            
+            page.on("request", on_request)
+            
             logger.info("Clicando em 'Exportar AT'...")
             botao_exportar = page.locator('button:has-text("Exportar AT")').first
             await botao_exportar.wait_for(timeout=10_000)
             await botao_exportar.click()
-            await page.wait_for_timeout(3_000)
+            await page.wait_for_timeout(5_000)
 
             # Tratar modal de confirmação, se aparecer
             for seletor_confirmar in [
@@ -163,12 +176,23 @@ async def extract_shopee_atribuicao() -> Path:
                     if await btn.is_visible():
                         logger.info(f"Modal de confirmação detectado — clicando '{seletor_confirmar}'")
                         await btn.click()
-                        await page.wait_for_timeout(1_500)
+                        await page.wait_for_timeout(3_000)
                         break
                 except Exception:
                     pass
 
-            await page.wait_for_timeout(2_000)
+            await page.wait_for_timeout(3_000)
+            
+            # Parar interceptação
+            page.remove_listener("request", on_request)
+            
+            # Log de todos os requests capturados
+            logger.info(f"Requests capturados relacionados a export: {len(export_requests)}")
+            for i, req in enumerate(export_requests):
+                logger.info(f"  [{i}] {req['method']} {req['url']}")
+                if req.get('post_data'):
+                    logger.info(f"       POST data: {req['post_data'][:300]}")
+            
             await page.screenshot(path=str(output_path / "pos_exportar_at.png"))
 
             # Verificar se o clique criou um novo export
@@ -183,36 +207,38 @@ async def extract_shopee_atribuicao() -> Path:
             if export_criado:
                 logger.info(f"✅ Export criado via clique: {novos_pos_clique[0]}")
             else:
-                # Tentativa 2: chamar API de export diretamente
-                logger.warning("⚠️ Clique no botão não criou novo export — tentando via API direta...")
-                try:
-                    export_resp = await page.request.post(
-                        EXPORT_API_URL,
-                        timeout=30_000
-                    )
-                    logger.info(f"Resposta da API de export: status={export_resp.status}")
-                    if export_resp.ok:
-                        export_body = await export_resp.json()
-                        logger.info(f"Resposta: {export_body}")
-                    else:
-                        logger.warning(f"API retornou status {export_resp.status}")
-                except Exception as e:
-                    logger.warning(f"Erro ao chamar API de export: {e}")
-                
-                await page.wait_for_timeout(3_000)
-                # Verificar novamente
-                hist_pos_api = await page.request.get(HISTORY_URL, timeout=30_000)
-                hist_pos_api_json = await hist_pos_api.json()
-                exports_pos_api = hist_pos_api_json.get("data", {}).get("exports", [])
-                novos_pos_api = [e for e in exports_pos_api if e["task_id"] not in existing_task_ids]
-                
-                if len(novos_pos_api) > 0:
-                    logger.info(f"✅ Export criado via API: {novos_pos_api[0]}")
-                    export_criado = True
+                logger.error("❌ Falha ao criar export — nenhum novo task_id detectado após clique no botão.")
+                if export_requests:
+                    logger.error("Requests capturados que deveriam ter criado o export:")
+                    for req in export_requests:
+                        logger.error(f"  → {req['method']} {req['url']}")
+                        if req.get('post_data'):
+                            logger.error(f"     Payload: {req['post_data']}")
                 else:
-                    logger.error("❌ Falha ao criar export — nenhum novo task_id detectado.")
+                    logger.error("NENHUM request de export foi capturado — o botão pode não estar funcionando.")
+                    logger.error("Tentando clicar novamente com force=True...")
+                    try:
+                        botao_exportar2 = page.locator('button:has-text("Exportar AT")').first
+                        await botao_exportar2.click(force=True)
+                        await page.wait_for_timeout(5_000)
+                        
+                        # Verificar novamente
+                        hist_pos_clique2 = await page.request.get(HISTORY_URL, timeout=30_000)
+                        hist_pos_clique2_json = await hist_pos_clique2.json()
+                        exports_pos_clique2 = hist_pos_clique2_json.get("data", {}).get("exports", [])
+                        novos_pos_clique2 = [e for e in exports_pos_clique2 if e["task_id"] not in existing_task_ids]
+                        
+                        if len(novos_pos_clique2) > 0:
+                            logger.info(f"✅ Export criado após segundo clique: {novos_pos_clique2[0]}")
+                            export_criado = True
+                        else:
+                            logger.error("Segundo clique também não criou export.")
+                    except Exception as e:
+                        logger.error(f"Erro no segundo clique: {e}")
+                
+                if not export_criado:
                     await page.screenshot(path=str(output_path / "erro_export_falhado.png"))
-                    raise Exception("Falha ao criar export: botão e API não geraram novo task_id.")
+                    raise Exception("Falha ao criar export: botão não gerou novo task_id.")
 
             # 6. ABRIR PAINEL → VER TUDO (navegação como humano)
             logger.info("Abrindo painel 'Última tarefa' via ícone...")
