@@ -122,38 +122,18 @@ async def extract_shopee_atribuicao() -> Path:
             }
             logger.info(f"Task IDs existentes: {existing_task_ids}")
 
-            # 5. CLICAR EM "EXPORTAR AT"
+            # 5. CLICAR EM "EXPORTAR AT" — abre o painel "Última tarefa" e dispara o export
             logger.info("Clicando em 'Exportar AT'...")
-            try:
-                botao_exportar = page.locator('button:has-text("Exportar AT")').first
-                await botao_exportar.wait_for(timeout=10_000)
-                await botao_exportar.click()
-            except Exception:
-                botao_exportar = page.locator('button:has-text("Exportar")').first
-                await botao_exportar.wait_for(timeout=10_000)
-                await botao_exportar.click()
-
-            await page.wait_for_timeout(2_000)
-
-            # Verifica se abriu dropdown (segunda ocorrência)
-            opcoes = page.locator('text=Exportar AT')
-            count_opcoes = await opcoes.count()
-            logger.info(f"Ocorrências de 'Exportar AT' na página: {count_opcoes}")
-            if count_opcoes > 1:
-                logger.info("Dropdown detectado — clicando na opção 'Exportar AT'...")
-                await opcoes.nth(1).click()
-                await page.wait_for_timeout(2_000)
-            else:
-                logger.info("Nenhum dropdown detectado — export já foi disparado pelo primeiro clique.")
-
+            botao_exportar = page.locator('button:has-text("Exportar AT")').first
+            await botao_exportar.wait_for(timeout=10_000)
+            await botao_exportar.click()
+            await page.wait_for_timeout(3_000)
             await page.screenshot(path=str(output_path / "pos_exportar_at.png"))
             logger.info("Exportação solicitada — aguardando novo export ficar pronto (polling)...")
 
-            # 6. POLLING DO HISTORY API até aparecer novo task_id
-            # Primeiro aguarda aparecer (qualquer status), depois aguarda status=2 (concluído)
+            # 6. POLLING DO HISTORY API até aparecer novo task_id com status=2 (concluído)
             # Aguarda até 15 minutos (60 tentativas × 15s)
             novo_export = None
-            novo_task_id_em_andamento = None
             caminho_arquivo = None
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -170,22 +150,43 @@ async def extract_shopee_atribuicao() -> Path:
                         concluido = next((e for e in novos if e.get("status") == 2), None)
                         if concluido:
                             novo_export = concluido
-                        else:
-                            novo_task_id_em_andamento = novos[0]["task_id"]
-                    elif novo_task_id_em_andamento:
-                        logger.info(f"task_id {novo_task_id_em_andamento} ainda processando... {elapsed}s")
+                    else:
+                        logger.info(f"Aguardando novo task_id... {elapsed}s decorridos")
                 except Exception as e:
                     logger.warning(f"Erro ao consultar history ({elapsed}s): {e}")
 
                 if novo_export:
                     logger.info(f"✅ Novo export pronto após {elapsed}s — task_id={novo_export['task_id']}")
                     break
-                logger.info(f"Aguardando processamento... {elapsed}s decorridos")
 
             if not novo_export:
                 raise Exception("Timeout: novo export não ficou pronto em 15 minutos.")
 
-            # 7. DOWNLOAD direto via URL do history
+            # 7. ABRIR PAINEL E CLICAR "BAIXAR" para capturar o download
+            logger.info("Abrindo painel 'Última tarefa' via ícone...")
+            try:
+                icone = page.locator('div[data-v-13320df0].icon').first
+                await icone.wait_for(timeout=10_000)
+                await icone.click()
+                await page.wait_for_timeout(3_000)
+            except Exception as e:
+                logger.warning(f"Painel já aberto ou ícone não encontrado: {e}")
+
+            logger.info("Clicando em 'Baixar' no export mais recente...")
+            all_request_urls = []
+
+            def on_any_request(req):
+                all_request_urls.append((req.resource_type, req.url))
+
+            page.on("request", on_any_request)
+            botao_baixar = page.locator('button:has-text("Baixar")').first
+            await botao_baixar.wait_for(timeout=15_000)
+            await botao_baixar.click()
+            await page.wait_for_timeout(5_000)
+            page.remove_listener("request", on_any_request)
+
+            # O clique em "Baixar" faz XHR ao history e inicia download pelo browser
+            # Usamos o filename já capturado pelo polling para baixar diretamente
             filename_relativo = novo_export.get("filename", "")
             if not filename_relativo:
                 raise Exception(f"Campo 'filename' vazio no export: {novo_export}")
