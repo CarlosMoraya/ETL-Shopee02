@@ -182,7 +182,7 @@ async def extract_shopee_atribuicao() -> Path:
 
             # 7. DOWNLOAD
             logger.info("Clicando em 'Baixar' no export mais recente...")
-            async with page.expect_download(timeout=120_000) as download_info:
+            async with page.expect_download(timeout=300_000) as download_info:
                 await botao_baixar.click()
 
             download = await download_info.value
