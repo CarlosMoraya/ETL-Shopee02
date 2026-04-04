@@ -199,149 +199,81 @@ async def extract_shopee_atribuicao() -> Path:
             logger.info("Clicando em 'Exportar AT'...")
             botao_exportar = None
             for seletor in [
+                'button.ssc-react-button:has-text("Exportar AT")',
                 'button:has-text("Exportar AT")',
                 'button:has-text("Exportar")',
-                'div:has-text("Exportar AT")',
             ]:
                 try:
                     botao_exportar = page.locator(seletor).first
-                    await botao_exportar.wait_for(timeout=5_000)
+                    await botao_exportar.wait_for(timeout=10_000)
                     logger.info(f"Botão Exportar AT encontrado: {seletor}")
                     break
                 except Exception:
                     continue
-            
+
             if botao_exportar:
                 await botao_exportar.click()
                 logger.info("✅ Botão 'Exportar AT' clicado.")
             else:
-                # Fallback: buscar pelo botão usando avaliação JavaScript
-                logger.info("Tentando encontrar botão via JavaScript...")
-                try:
-                    result = await page.evaluate("""() => {
-                        const buttons = Array.from(document.querySelectorAll('button'));
-                        const exportBtn = buttons.find(btn => btn.textContent.includes('Exportar AT'));
-                        if (exportBtn) {
-                            exportBtn.click();
-                            return true;
-                        }
-                        return false;
-                    }""")
-                    await page.wait_for_timeout(2_000)
-                    if result:
-                        logger.info("✅ Botão 'Exportar AT' clicado via JavaScript.")
-                    else:
-                        raise Exception("Botão não encontrado via JavaScript")
-                except Exception as e:
-                    logger.error(f"Erro ao clicar botão: {e}")
-                    await page.screenshot(path=str(output_path / "erro_botao_exportar.png"))
-                    raise Exception("Botão 'Exportar AT' não encontrado.")
+                logger.error("Botão 'Exportar AT' não encontrado!")
+                await page.screenshot(path=str(output_path / "erro_botao_exportar.png"))
+                raise Exception("Botão 'Exportar AT' não encontrado.")
 
-            # Tratar modal de confirmação, se aparecer
-            await page.wait_for_timeout(2_000)
-            for seletor_confirmar in [
-                'button:has-text("Confirm")',
-                'button:has-text("Confirmar")',
-                'button:has-text("OK")',
-                'button:has-text("Yes")',
-                'button:has-text("Sim")',
-            ]:
-                try:
-                    btn = page.locator(seletor_confirmar).first
-                    if await btn.is_visible():
-                        logger.info(f"Modal detectado — clicando '{seletor_confirmar}'")
-                        await btn.click()
-                        await page.wait_for_timeout(1_500)
-                        break
-                except Exception:
-                    pass
-
-            await page.screenshot(path=str(output_path / "pos_exportar_at.png"))
-
-            # 6. AGUARDAR 30 SEGUNDOS
-            logger.info("Aguardando 30 segundos para o export ser processado...")
+            # Aguardar 30 segundos para o export ser processado
+            logger.info("Aguardando 30 segundos para processamento do export...")
             await page.wait_for_timeout(30_000)
             logger.info("✅ Aguardo concluído.")
 
-            # 7. ABRIR PAINEL "ÚLTIMA TAREFA"
-            logger.info("Abrindo painel 'Última tarefa'...")
-            try:
-                icone_tarefa = page.locator('.icon').filter(has_text="").first
-                await icone_tarefa.wait_for(timeout=10_000)
-                await icone_tarefa.click()
-                await page.wait_for_timeout(2_000)
-                
-                logger.info("Clicando em 'Ver tudo'...")
-                ver_tudo = page.locator('button:has-text("Ver tudo")').first
-                await ver_tudo.click()
-                await page.wait_for_timeout(3_000)
-                await page.screenshot(path=str(output_path / "export_task_center.png"))
-                logger.info("✅ Export Task Center aberto.")
-            except Exception as e:
-                logger.warning(f"Erro ao abrir painel: {e}")
-                # Tentar alternativa: recarregar a página e tentar novamente
-                logger.info("Tentando recarregar a página...")
-                await page.goto(ATRIBUICAO_URL, wait_until="domcontentloaded", timeout=60_000)
-                await page.wait_for_timeout(5_000)
+            # 5. ABRIR PAINEL "ÚLTIMA TAREFA" via ícone de tarefas no header
+            logger.info("Abrindo painel 'Última tarefa' via ícone de tarefas...")
+            painel_aberto = False
+            for tentativa_painel in range(4):
+                try:
+                    icone = page.locator('div[data-v-13320df0].icon').first
+                    await icone.wait_for(timeout=5_000)
+                    await icone.click()
+                    await page.wait_for_timeout(3_000)
+                    await page.screenshot(path=str(output_path / f"painel_tentativa_{tentativa_painel}.png"))
+                    painel_aberto = True
+                    logger.info(f"✅ Painel aberto (tentativa {tentativa_painel + 1})")
+                    break
+                except Exception as e:
+                    logger.warning(f"Tentativa {tentativa_painel + 1} — ícone não encontrado: {e}")
+                    await page.wait_for_timeout(30_000)
 
-            # 8. BAIXAR O ARQUIVO MAIS RECENTE
-            logger.info("Procurando botão 'Baixar' do export mais recente...")
-            try:
-                # Procurar pelo primeiro botão "Baixar" que esteja visível
-                botoes_baixar = page.locator('button:has-text("Baixar")')
-                await botoes_baixar.first.wait_for(timeout=30_000)
-                
-                # Clicar no primeiro botão "Baixar" (mais recente)
-                botao_baixar = botoes_baixar.first
+            if not painel_aberto:
+                await page.screenshot(path=str(output_path / "erro_painel.png"))
+                raise Exception("Não foi possível abrir o painel 'Última tarefa'.")
+
+            # 6. AGUARDAR BOTÃO "BAIXAR" NO PAINEL
+            logger.info("Aguardando botão 'Baixar' no painel...")
+            botao_baixar = page.locator('button:has-text("Baixar")').first
+            encontrado = False
+            for tentativa_baixar in range(4):
+                try:
+                    await botao_baixar.wait_for(timeout=30_000)
+                    logger.info(f"✅ Botão 'Baixar' encontrado após {tentativa_baixar * 30}s adicionais!")
+                    encontrado = True
+                    break
+                except Exception:
+                    elapsed_extra = (tentativa_baixar + 1) * 30
+                    logger.info(f"Botão 'Baixar' não visível ainda — aguardando mais 30s ({elapsed_extra}s extra)...")
+                    await page.screenshot(path=str(output_path / f"aguardando_baixar_{elapsed_extra}s.png"))
+
+            if not encontrado:
+                await page.screenshot(path=str(output_path / "erro_sem_baixar.png"))
+                raise Exception("Timeout: botão 'Baixar' não apareceu no painel.")
+
+            # 7. DOWNLOAD — clica no PRIMEIRO botão "Baixar" (mais recente)
+            logger.info("Clicando em 'Baixar' no export mais recente...")
+            async with page.expect_download(timeout=120_000) as download_info:
                 await botao_baixar.click()
-                logger.info("✅ Botão 'Baixar' clicado.")
-                
-                # Aguardar o download
-                async with page.expect_download(timeout=300_000) as download_info:
-                    pass  # O clique já foi feito
-                
-                download = await download_info.value
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                ext = Path(download.suggested_filename).suffix
-                caminho_arquivo = output_path / f"shopee_atribuicao_{timestamp}{ext}"
-                await download.save_as(caminho_arquivo)
-                logger.info(f"✅ Arquivo baixado: {caminho_arquivo}")
-                
-            except Exception as e:
-                logger.error(f"Erro ao baixar: {e}")
-                await page.screenshot(path=str(output_path / "erro_download.png"))
-                
-                # Tentativa alternativa: buscar via API
-                logger.info("Tentando download via API...")
-                HISTORY_URL = (
-                    "https://logistics.myagencyservice.com.br"
-                    "/api/delivery/agency/assignment/assignment_task/export/history"
-                )
-                hist_resp = await page.request.get(HISTORY_URL, timeout=30_000)
-                hist_json = await hist_resp.json()
-                exports = hist_json.get("data", {}).get("exports", [])
-                
-                if exports:
-                    # Pegar o export mais recente de AT (não Romaneio)
-                    export_at = next(
-                        (e for e in exports if "romaneio" not in e.get("task_name", "").lower()),
-                        exports[0]
-                    )
-                    filename_relativo = export_at.get("filename", "")
-                    if filename_relativo:
-                        file_url = f"{PORTAL_URL.rstrip('/')}/{filename_relativo.lstrip('/')}"
-                        logger.info(f"Baixando via API: {file_url}")
-                        file_resp = await page.request.get(file_url, timeout=300_000)
-                        if file_resp.ok:
-                            caminho_arquivo = output_path / f"shopee_atribuicao_{timestamp}{ext}"
-                            caminho_arquivo.write_bytes(await file_resp.body())
-                            logger.info(f"✅ Arquivo baixado via API: {caminho_arquivo}")
-                        else:
-                            raise Exception(f"Download via API falhou — status {file_resp.status}")
-                    else:
-                        raise Exception("Campo 'filename' vazio no export.")
-                else:
-                    raise Exception("Nenhum export encontrado na API.")
+
+            download = await download_info.value
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            caminho_arquivo = output_path / f"shopee_atribuicao_{timestamp}_{download.suggested_filename}"
+            await download.save_as(str(caminho_arquivo))
+            logger.info(f"✅ Arquivo baixado: {caminho_arquivo}")
 
         finally:
             await browser.close()
