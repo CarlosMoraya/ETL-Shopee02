@@ -192,7 +192,21 @@ async def extract_shopee_pnr() -> Path:
     # 8. PROCESSAR COM PANDAS
     logger.info("Processando arquivo...")
     sufixo = Path(caminho_arquivo).suffix.lower()
-    if sufixo == ".csv":
+    if sufixo == ".zip":
+        import zipfile
+        logger.info("Arquivo ZIP detectado — descompactando...")
+        with zipfile.ZipFile(caminho_arquivo, "r") as z:
+            nomes = z.namelist()
+            logger.info(f"Conteúdo do ZIP: {nomes}")
+            arquivo_interno = nomes[0]
+            z.extractall(output_path)
+        caminho_interno = output_path / arquivo_interno
+        ext_interna = Path(arquivo_interno).suffix.lower()
+        if ext_interna == ".csv":
+            df = pd.read_csv(caminho_interno)
+        else:
+            df = pd.read_excel(caminho_interno)
+    elif sufixo == ".csv":
         df = pd.read_csv(caminho_arquivo)
     else:
         df = pd.read_excel(caminho_arquivo)
