@@ -1,10 +1,6 @@
 """
 Pipelines ETL Shopee
 """
-from .shopee_monitoramento_pipeline import run_pipeline as run_monitoramento_pipeline
-from .shopee_driver_profile_pipeline import run_pipeline as run_driver_profile_pipeline
-from .shopee_pnr_pipeline import run_pipeline as run_pnr_pipeline
-from .shopee_atribuicao_pipeline import run_pipeline as run_atribuicao_pipeline
 
 __all__ = [
     "run_monitoramento_pipeline",
@@ -12,3 +8,20 @@ __all__ = [
     "run_pnr_pipeline",
     "run_atribuicao_pipeline",
 ]
+
+
+def __getattr__(name):
+    """Lazy imports para evitar warnings de import circular"""
+    if name == "run_monitoramento_pipeline":
+        from .shopee_monitoramento_pipeline import run_pipeline
+        return run_pipeline
+    elif name == "run_driver_profile_pipeline":
+        from .shopee_driver_profile_pipeline import run_pipeline
+        return run_pipeline
+    elif name == "run_pnr_pipeline":
+        from .shopee_pnr_pipeline import run_pipeline
+        return run_pipeline
+    elif name == "run_atribuicao_pipeline":
+        from .shopee_atribuicao_pipeline import run_pipeline
+        return run_pipeline
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

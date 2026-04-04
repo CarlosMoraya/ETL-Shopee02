@@ -182,29 +182,42 @@ async def extract_shopee_atribuicao() -> Path:
             logger.info("✅ Export Task Center aberto.")
 
             # 7. POLLING DA API para identificar o novo export de AT (ignora Romaneio e outros)
-            # Aguarda até 15 minutos (60 tentativas × 15s)
+            # Aguarda até 25 minutos (150 tentativas × 10s)
             logger.info("Aguardando novo export de AT ficar pronto...")
             novo_export = None
             caminho_arquivo = None
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            status_detectados = set()
 
-            for tentativa in range(60):
-                await page.wait_for_timeout(15_000)
-                elapsed = (tentativa + 1) * 15
+            for tentativa in range(150):
+                await page.wait_for_timeout(10_000)
+                elapsed = (tentativa + 1) * 10
                 try:
                     hist_resp = await page.request.get(HISTORY_URL, timeout=30_000)
                     hist_json = await hist_resp.json()
                     exports = hist_json.get("data", {}).get("exports", [])
                     novos = [e for e in exports if e["task_id"] not in existing_task_ids]
                     if novos:
+                        # Log de todos os status detectados para debugging
+                        for e in novos:
+                            status_detectados.add(e.get("status"))
+                        
+                        # status == 2 = pronto, status == 1 = processando, status == 3 = falhou
                         concluido = next((e for e in novos if e.get("status") == 2), None)
+                        falhou = next((e for e in novos if e.get("status") in [3, 4, 5]), None)
+                        
+                        if falhou:
+                            logger.error(f"❌ Export falhou com status={falhou.get('status')} — task_id={falhou['task_id']}")
+                            raise Exception(f"Export falhou com status={falhou.get('status')} — task_id={falhou['task_id']}")
+                        
                         if concluido:
                             novo_export = concluido
                             logger.info(f"✅ Novo export pronto após {elapsed}s — task_id={novo_export['task_id']}")
                         else:
                             logger.info(f"Novo export detectado mas ainda processando (status={[e.get('status') for e in novos]}) — {elapsed}s")
                     else:
-                        logger.info(f"Aguardando novo export... {elapsed}s decorridos")
+                        if tentativa % 6 == 0:  # Log a cada ~60s
+                            logger.info(f"Aguardando novo export... {elapsed}s decorridos")
                 except Exception as e:
                     logger.warning(f"Erro ao consultar history ({elapsed}s): {e}")
 
@@ -212,7 +225,8 @@ async def extract_shopee_atribuicao() -> Path:
                     break
 
             if not novo_export:
-                raise Exception("Timeout: novo export de AT não ficou pronto em 15 minutos.")
+                logger.error(f"Status detectados durante polling: {status_detectados}")
+                raise Exception("Timeout: novo export de AT não ficou pronto em 25 minutos.")
 
             # 8. BAIXAR O ARQUIVO CORRETO via URL identificada no polling
             filename_relativo = novo_export.get("filename", "")
