@@ -150,6 +150,25 @@ async def extract_shopee_atribuicao() -> Path:
             await page.screenshot(path=str(output_path / "pagina_atribuicao.png"))
             logger.info("✅ Página de Atribuição de Entrega carregada.")
 
+            # 2.1. ALTERAR PAGINAÇÃO PARA 100 (máximo) para garantir export completo
+            logger.info("Configurando paginação para 100 itens por página...")
+            try:
+                # Clicar no dropdown de paginação (ex: "20 / página")
+                dropdown_pagina = page.locator('text=/\\d+\\s*\\/\\s*página/').first
+                await dropdown_pagina.wait_for(timeout=10_000)
+                await dropdown_pagina.click()
+                await page.wait_for_timeout(1_000)
+                
+                # Selecionar "100 / página"
+                opcao_100 = page.locator('text="100"').first
+                await opcao_100.click()
+                await page.wait_for_timeout(3_000)
+                logger.info("✅ Paginação configurada para 100 itens/página.")
+            except Exception as e:
+                logger.warning(f"Não foi possível alterar paginação: {e}")
+            
+            await page.screenshot(path=str(output_path / "pos_paginacao.png"))
+
             # 3. SELECIONAR TODOS OS REGISTROS
             # Pelo screenshot: clicar no checkbox do header da tabela para abrir dropdown
             logger.info("Selecionando todos os registros...")
@@ -220,6 +239,25 @@ async def extract_shopee_atribuicao() -> Path:
                     # Tirar screenshot para confirmar
                     await page.screenshot(path=str(output_path / "pos_selecao.png"))
                     logger.info("✅ Seleção concluída.")
+                    
+                    # Aguardar para garantir que a seleção foi processada pelo backend
+                    logger.info("Aguardando processamento da seleção...")
+                    await page.wait_for_timeout(10_000)  # Aumentado para 10s
+                    
+                    # Verificar novamente quantos estão selecionados
+                    try:
+                        texto_final = await page.locator('text=Selected').first.text_content(timeout=5_000)
+                        logger.info(f"Seleção final confirmada: {texto_final}")
+                        # Extrair número para validar
+                        import re
+                        match = re.search(r'(\d[\d,]*)\s+Task', texto_final)
+                        if match:
+                            num_selecionado = int(match.group(1).replace(',', ''))
+                            logger.info(f"Total selecionado: {num_selecionado} tarefas")
+                            if num_selecionado < 5000:
+                                logger.warning(f"⚠️ Apenas {num_selecionado} selecionadas, esperado ~9.621. A seleção pode não ter persistido.")
+                    except Exception:
+                        logger.warning("Não foi possível confirmar seleção final.")
                 else:
                     logger.warning("Checkbox do header não encontrado — pulando seleção.")
             except Exception as e:
@@ -311,23 +349,26 @@ async def extract_shopee_atribuicao() -> Path:
                 await page.screenshot(path=str(output_path / "erro_painel.png"))
                 raise Exception("Não foi possível abrir o painel 'Última tarefa'.")
 
-            # 6. AGUARDAR E CLICAR NO BOTÃO "DOWNLOAD"
-            logger.info("Procurando botão 'Download' no painel...")
+            # 6. AGUARDAR E CLICAR NO BOTÃO "DOWNLOAD" DA TAREFA MAIS RECENTE
+            logger.info("Procurando botão 'Download' da tarefa mais recente...")
             
-            # Usar JavaScript para encontrar e clicar o primeiro botão "Download"
-            # O painel tem overflow-y: auto então botões podem não estar visíveis para Playwright
+            # Usar JavaScript para encontrar o botão Download da primeira task-row (mais recente)
             for tentativa in range(6):
                 try:
                     clicado = await page.evaluate("""() => {
-                        // Procurar em todas as task-rows o primeiro botão Download visível
-                        const buttons = Array.from(document.querySelectorAll('.task-row .status-wrapper button, button.ssc-button'));
-                        const downloadBtn = buttons.find(btn => 
-                            (btn.textContent.trim() === 'Download' || btn.textContent.trim() === 'Baixar') && 
-                            btn.offsetParent !== null
-                        );
-                        if (downloadBtn) {
-                            downloadBtn.click();
-                            return true;
+                        // Pegar a PRIMEIRA task-row (mais recente) e clicar seu botão Download
+                        const taskRows = document.querySelectorAll('.task-row');
+                        if (taskRows.length > 0) {
+                            const firstRow = taskRows[0];
+                            const downloadBtn = firstRow.querySelector('.status-wrapper button');
+                            if (downloadBtn && downloadBtn.offsetParent !== null) {
+                                // Verificar se é um botão Download/Baixar
+                                const text = downloadBtn.textContent.trim();
+                                if (text === 'Download' || text === 'Baixar') {
+                                    downloadBtn.click();
+                                    return true;
+                                }
+                            }
                         }
                         return false;
                     }""")
