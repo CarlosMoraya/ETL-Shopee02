@@ -279,15 +279,25 @@ async def extract_shopee_atribuicao() -> Path:
                     await icone.click()
                     await page.wait_for_timeout(3_000)
                     
-                    # Clicar em "Ver tudo" para abrir Export Task Center
-                    logger.info("Clicando em 'Ver tudo'...")
+                    # O portal alterna entre PT-BR e EN; aceitar ambos.
+                    logger.info("Tentando abrir detalhes completos da tarefa...")
                     try:
-                        ver_tudo = page.locator('button:has-text("Ver tudo")').first
-                        await ver_tudo.wait_for(timeout=10_000)
-                        await ver_tudo.click()
-                        await page.wait_for_timeout(3_000)
+                        ver_tudo = None
+                        for seletor_ver_tudo in [
+                            'button:has-text("Ver tudo")',
+                            'button:has-text("View All")',
+                        ]:
+                            try:
+                                ver_tudo = page.locator(seletor_ver_tudo).first
+                                await ver_tudo.wait_for(timeout=5_000)
+                                await ver_tudo.click()
+                                logger.info(f"Detalhes abertos com seletor: {seletor_ver_tudo}")
+                                await page.wait_for_timeout(3_000)
+                                break
+                            except Exception:
+                                continue
                     except Exception as e:
-                        logger.warning(f"'Ver tudo' não encontrado: {e}")
+                        logger.warning(f"Botão de detalhes completos não encontrado: {e}")
                     
                     await page.screenshot(path=str(output_path / f"painel_tentativa_{tentativa_painel}.png"))
                     painel_aberto = True
@@ -301,8 +311,8 @@ async def extract_shopee_atribuicao() -> Path:
                 await page.screenshot(path=str(output_path / "erro_painel.png"))
                 raise Exception("Não foi possível abrir o painel 'Última tarefa'.")
 
-            # 6. AGUARDAR BOTÃO "BAIXAR" NO PAINEL
-            logger.info("Aguardando botão 'Baixar' no painel...")
+            # 6. AGUARDAR BOTÃO DE DOWNLOAD DA TAREFA MAIS RECENTE
+            logger.info("Aguardando tarefa exportada com botão de download no painel...")
             
             # O painel pode precisar de scroll ou o botão pode estar em outra posição
             # Tentar múltiplos seletores
@@ -311,21 +321,65 @@ async def extract_shopee_atribuicao() -> Path:
             
             for tentativa_baixar in range(4):
                 try:
-                    # Tentar múltiplos seletores para o botão Baixar
-                    for seletor in [
-                        'button:has-text("Baixar")',
-                        'button.ssc-button:has-text("Baixar")',
-                        'button.ssc-react-button:has-text("Baixar")',
-                        'div >> text="Baixar"',
+                    # Primeiro, tentar localizar a linha mais recente com status de sucesso.
+                    for seletor_linha in [
+                        'div:has-text("Succeed")',
+                        'div:has-text("Success")',
+                        'div:has-text("Succeeded")',
+                        'li:has-text("Succeed")',
+                        'li:has-text("Success")',
+                        'tr:has-text("Succeed")',
+                        'tr:has-text("Success")',
                     ]:
                         try:
-                            botao_baixar = page.locator(seletor).first
-                            await botao_baixar.wait_for(timeout=10_000)
-                            logger.info(f"Botão 'Baixar' encontrado com: {seletor}")
-                            encontrado = True
-                            break
+                            linha_sucesso = page.locator(seletor_linha).first
+                            await linha_sucesso.wait_for(timeout=3_000)
+
+                            for seletor_botao in [
+                                'button:has-text("Baixar")',
+                                'button:has-text("Download")',
+                                'button.ssc-button:has-text("Baixar")',
+                                'button.ssc-button:has-text("Download")',
+                                'button.ssc-react-button:has-text("Baixar")',
+                                'button.ssc-react-button:has-text("Download")',
+                            ]:
+                                try:
+                                    botao_baixar = linha_sucesso.locator(seletor_botao).first
+                                    await botao_baixar.wait_for(timeout=3_000)
+                                    logger.info(
+                                        "Botão de download encontrado na tarefa com sucesso: "
+                                        f"{seletor_linha} -> {seletor_botao}"
+                                    )
+                                    encontrado = True
+                                    break
+                                except Exception:
+                                    continue
+
+                            if encontrado:
+                                break
                         except Exception:
                             continue
+
+                    # Fallback: procurar qualquer botão visível no painel.
+                    if not encontrado:
+                        for seletor in [
+                            'button:has-text("Baixar")',
+                            'button:has-text("Download")',
+                            'button.ssc-button:has-text("Baixar")',
+                            'button.ssc-button:has-text("Download")',
+                            'button.ssc-react-button:has-text("Baixar")',
+                            'button.ssc-react-button:has-text("Download")',
+                            'div >> text="Baixar"',
+                            'div >> text="Download"',
+                        ]:
+                            try:
+                                botao_baixar = page.locator(seletor).first
+                                await botao_baixar.wait_for(timeout=10_000)
+                                logger.info(f"Botão de download encontrado com fallback: {seletor}")
+                                encontrado = True
+                                break
+                            except Exception:
+                                continue
                     
                     if encontrado:
                         break
@@ -333,16 +387,16 @@ async def extract_shopee_atribuicao() -> Path:
                     pass
                 
                 elapsed_extra = (tentativa_baixar + 1) * 30
-                logger.info(f"Botão 'Baixar' não visível ainda — aguardando mais 30s ({elapsed_extra}s extra)...")
+                logger.info(f"Botão de download não visível ainda — aguardando mais 30s ({elapsed_extra}s extra)...")
                 await page.screenshot(path=str(output_path / f"aguardando_baixar_{elapsed_extra}s.png"))
                 await page.wait_for_timeout(30_000)
 
             if not encontrado:
                 await page.screenshot(path=str(output_path / "erro_sem_baixar.png"))
-                raise Exception("Timeout: botão 'Baixar' não apareceu no painel.")
+                raise Exception("Timeout: botão de download não apareceu no painel.")
 
-            # 7. DOWNLOAD — clica no PRIMEIRO botão "Baixar" (mais recente)
-            logger.info("Clicando em 'Baixar' no export mais recente...")
+            # 7. DOWNLOAD — prioriza o botão da primeira tarefa com status de sucesso.
+            logger.info("Clicando no botão de download da tarefa exportada...")
             async with page.expect_download(timeout=120_000) as download_info:
                 await botao_baixar.click()
 
